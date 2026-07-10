@@ -54,6 +54,8 @@ See [`.env.example`](.env.example). Required (unless `MEENOW_DRY_RUN=true`):
 | `MEENOW_CATCHUP_MINUTES` | *(optional)* late-post window, default 120; `0` = always |
 | `MEENOW_DRY_RUN` | *(dev)* log the post instead of sending |
 | `MEENOW_POST_NOW` | *(dev)* fire one capture immediately, ignoring the schedule |
+| `MEENOW_MEDIA_BACKEND` | *(dev)* `default` (real camera) or `no_media` (headless) |
+| `MEENOW_ALLOW_SYNTHETIC` | *(dev)* allow the placeholder frame in a real post (test without a camera) |
 
 > The dedicated account must be **locked** (manually approve followers) for the
 > photos to stay followers-only; approve your meenow friends from Pixelfed or the

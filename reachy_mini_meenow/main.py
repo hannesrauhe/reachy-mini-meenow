@@ -100,7 +100,9 @@ class MeenowApp(ReachyMiniApp):
     def _capture_and_post(self, cfg: Config, client, reachy_mini,
                           stop_event: threading.Event) -> str | None:
         gestures.get_ready(reachy_mini, stop_event)
-        frame = camera.capture_frame(reachy_mini, allow_synthetic=cfg.dry_run)
+        frame = camera.capture_frame(
+            reachy_mini, allow_synthetic=cfg.dry_run or cfg.allow_synthetic
+        )
         jpeg = camera.encode_jpeg(frame)
         if cfg.dry_run or client is None:
             log.info(

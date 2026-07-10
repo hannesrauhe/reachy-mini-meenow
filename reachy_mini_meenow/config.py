@@ -48,6 +48,7 @@ class Config:
     caption: str | None
     dry_run: bool
     post_now: bool
+    allow_synthetic: bool
     catchup_min: int
     state_file: Path
 
@@ -61,6 +62,7 @@ def load_config() -> Config:
     caption = os.environ.get("MEENOW_CAPTION", "").strip() or None
     dry_run = _truthy(os.environ.get("MEENOW_DRY_RUN"))
     post_now = _truthy(os.environ.get("MEENOW_POST_NOW"))
+    allow_synthetic = _truthy(os.environ.get("MEENOW_ALLOW_SYNTHETIC"))
 
     catchup_raw = os.environ.get("MEENOW_CATCHUP_MINUTES", "120").strip()
     try:
@@ -94,6 +96,7 @@ def load_config() -> Config:
         caption=caption,
         dry_run=dry_run,
         post_now=post_now,
+        allow_synthetic=allow_synthetic,
         catchup_min=catchup_min,
         state_file=state_file,
     )
