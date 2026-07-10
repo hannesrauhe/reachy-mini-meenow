@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "reachy-mini-meenow"
+version = "0.1.0"
+description = "Reachy Mini app that posts a daily photo to a Pixelfed account at the meenow trigger time."
+authors = [{ name = "Hannes Rauhe" }]
+requires-python = ">=3.11"
+readme = "README.md"
+dependencies = [
+    "reachy-mini==1.9.0",
+    "requests>=2.31",
+    "numpy",
+    "opencv-python-headless",
+    "python-dotenv",
+    "platformdirs",
+    "tzdata",
+]
+
+[project.optional-dependencies]
+sim = ["reachy-mini[mujoco]==1.9.0"]
+dev = ["pytest", "ruff"]
+
+[project.scripts]
+reachy-mini-meenow = "reachy_mini_meenow.main:main"
+
+[project.entry-points."reachy_mini_apps"]
+reachy_mini_meenow = "reachy_mini_meenow.main:MeenowApp"
+
+[tool.setuptools.packages.find]
+include = ["reachy_mini_meenow*"]
+
+[tool.ruff]
+line-length = 100
