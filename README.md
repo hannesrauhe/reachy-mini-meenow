@@ -35,7 +35,11 @@ needed.
   used, matching a co-located meenow install; set `MEENOW_TZ` to pin an IANA zone.
 - **Posting** — mirrors meenow's `src/api/pixelfed.ts`: upload media
   (`POST /api/v1/media`, polling until processing completes), then create the status
-  (`POST /api/v1/statuses`, `visibility: private`, `#meenowApp`).
+  (`POST /api/v1/statuses`, `visibility: private`, `#meenowApp`). Requests use HTTP/2
+  (via httpx): Pixelfed tokens are large JWTs, and some instances' edge (e.g.
+  gram.social) reject that uncompressed `Authorization` header over HTTP/1.1 with a
+  400 — HTTP/2 HPACK-compresses it. httpx falls back to HTTP/1.1 where HTTP/2 is
+  unavailable.
 - **Once per period** — the trigger epoch of the last posted period is persisted, so
   a restart within the same period does not post twice. A missed window is skipped
   (see `MEENOW_CATCHUP_MINUTES`).

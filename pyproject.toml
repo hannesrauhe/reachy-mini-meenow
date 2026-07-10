@@ -11,7 +11,7 @@ requires-python = ">=3.11"
 readme = "README.md"
 dependencies = [
     "reachy-mini==1.9.0",
-    "requests>=2.31",
+    "httpx[http2]>=0.27",
     "numpy",
     "opencv-python-headless",
     "python-dotenv",

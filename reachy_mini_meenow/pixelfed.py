@@ -4,6 +4,12 @@ Ports the media-upload and status-creation flow from meenow's ``src/api/pixelfed
 so that posts are indistinguishable from the PWA's: a followers-only
 (``visibility: private``) status carrying the ``#meenowApp`` tag and at least one
 media attachment.
+
+Uses HTTP/2 (via httpx). Pixelfed access tokens are large (~1 KB RS256 JWTs); some
+instances' edge (e.g. gram.social) reject that uncompressed ``Authorization`` header
+over HTTP/1.1 with a 400 "Request Header Or Cookie Too Large", but accept it over
+HTTP/2 where HPACK compresses it. httpx negotiates HTTP/2 by ALPN and falls back to
+HTTP/1.1 for instances that do not offer it.
 """
 
 from __future__ import annotations
@@ -11,21 +17,23 @@ from __future__ import annotations
 import logging
 import time
 
-import requests
+import httpx
 
 log = logging.getLogger(__name__)
 
 MEENOW_TAG = "#meenowApp"
 _MEDIA_POLL_ATTEMPTS = 20
 _MEDIA_POLL_INTERVAL_S = 1.5
-_TIMEOUT_S = 30
+_TIMEOUT_S = 30.0
 
 
 class PixelfedClient:
-    def __init__(self, instance: str, token: str, session: requests.Session | None = None):
+    def __init__(self, instance: str, token: str, client: httpx.Client | None = None):
         self.instance = instance
         self.token = token
-        self.session = session or requests.Session()
+        self.client = client or httpx.Client(
+            http2=True, timeout=_TIMEOUT_S, trust_env=True
+        )
 
     @property
     def _headers(self) -> dict[str, str]:
@@ -37,27 +45,26 @@ class PixelfedClient:
     def verify_credentials(self) -> str | None:
         """Return the authenticated account id, or ``None`` on failure (non-fatal)."""
         try:
-            res = self.session.get(
-                self._url("/api/v1/accounts/verify_credentials"),
-                headers=self._headers,
-                timeout=_TIMEOUT_S,
+            res = self.client.get(
+                self._url("/api/v1/accounts/verify_credentials"), headers=self._headers
             )
-            res.raise_for_status()
+            if res.status_code >= 400:
+                log.warning("verify_credentials failed (%s)", res.status_code)
+                return None
             return res.json().get("id")
-        except (requests.RequestException, ValueError) as exc:
+        except (httpx.HTTPError, ValueError) as exc:
             log.warning("verify_credentials failed: %s", exc)
             return None
 
     def upload_media(self, jpeg: bytes, description: str) -> str:
         """Upload a JPEG and return its media id, polling until processing completes."""
-        res = self.session.post(
+        res = self.client.post(
             self._url("/api/v1/media"),
             headers=self._headers,
             files={"file": ("meenow.jpg", jpeg, "image/jpeg")},
             data={"description": description},
-            timeout=_TIMEOUT_S,
         )
-        if not res.ok:
+        if res.status_code >= 400:
             raise RuntimeError(f"Media upload failed ({res.status_code})")
         media = res.json()
         media_id = media["id"]
@@ -66,12 +73,10 @@ class PixelfedClient:
 
         for _ in range(_MEDIA_POLL_ATTEMPTS):
             time.sleep(_MEDIA_POLL_INTERVAL_S)
-            poll = self.session.get(
-                self._url(f"/api/v1/media/{media_id}"),
-                headers=self._headers,
-                timeout=_TIMEOUT_S,
+            poll = self.client.get(
+                self._url(f"/api/v1/media/{media_id}"), headers=self._headers
             )
-            if not poll.ok:
+            if poll.status_code >= 400:
                 raise RuntimeError(f"Media poll failed ({poll.status_code})")
             if poll.json().get("url") is not None:
                 return media_id
@@ -80,13 +85,12 @@ class PixelfedClient:
     def post_status(self, media_ids: list[str], caption: str | None) -> str:
         """Create a followers-only status tagged ``#meenowApp``; return its URL."""
         status = build_status_text(caption)
-        res = self.session.post(
+        res = self.client.post(
             self._url("/api/v1/statuses"),
-            headers={**self._headers, "Content-Type": "application/json"},
+            headers=self._headers,
             json={"status": status, "media_ids": media_ids, "visibility": "private"},
-            timeout=_TIMEOUT_S,
         )
-        if not res.ok:
+        if res.status_code >= 400:
             raise RuntimeError(f"Post failed ({res.status_code})")
         return res.json().get("url", "")
 
