@@ -19,6 +19,35 @@ log = logging.getLogger(__name__)
 
 _CTRL_HZ = 50.0
 _CTRL_DT = 1.0 / _CTRL_HZ
+_ANTENNA_IDS = ["left_antenna", "right_antenna"]
+
+
+def release_antennas(reachy_mini) -> bool:
+    """Torque off the antennas so they are back-drivable; False if unsupported."""
+    try:
+        reachy_mini.disable_motors(ids=list(_ANTENNA_IDS))
+        return True
+    except Exception as exc:  # noqa: BLE001 - optional feature, degrade silently
+        log.warning("release_antennas failed: %s", exc)
+        return False
+
+
+def hold_antennas(reachy_mini) -> None:
+    """Re-enable antenna torque (pins targets to the present pose first)."""
+    try:
+        reachy_mini.enable_motors(ids=list(_ANTENNA_IDS))
+    except Exception as exc:  # noqa: BLE001
+        log.warning("hold_antennas failed: %s", exc)
+
+
+def read_antennas(reachy_mini) -> list[float] | None:
+    """Present antenna joint positions in radians, or ``None`` if unavailable."""
+    try:
+        pos = reachy_mini.get_present_antenna_joint_positions()
+        return None if pos is None else [float(p) for p in pos]
+    except Exception as exc:  # noqa: BLE001
+        log.warning("read_antennas failed: %s", exc)
+        return None
 
 
 def _neutral_pose():
@@ -77,6 +106,15 @@ def _wiggle(reachy_mini, stop_event: threading.Event, duration: float,
         a = np.deg2rad(antenna_amp_deg * np.sin(2.0 * np.pi * antenna_hz * t))
         reachy_mini.set_target(head=head, antennas=np.array([a, -a]))
         time.sleep(_CTRL_DT)
+
+
+def hello(reachy_mini, stop_event: threading.Event) -> None:
+    """A slow greeting wave on startup so it's visible the app is running."""
+    log.info("hello")
+    _wiggle(reachy_mini, stop_event, duration=2.2,
+            yaw_amp=25.0, pitch_amp=6.0, antenna_amp_deg=45.0,
+            yaw_hz=0.5, antenna_hz=0.8)
+    go_neutral(reachy_mini, duration=0.6)
 
 
 def get_ready(reachy_mini, stop_event: threading.Event, countdown_s: int = 3) -> None:
