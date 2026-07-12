@@ -1,14 +1,23 @@
 """Camera capture and JPEG encoding.
 
-Grabs a frame from the robot's camera (BGR ``numpy`` array). When the camera is
-unavailable — common in a headless simulator without a rendering backend — a
-synthetic placeholder frame is used instead so the capture-and-post pipeline stays
-exercisable end to end.
+The app needs a single still photo, so it captures **directly** from the local
+camera device (OpenCV / V4L2) rather than the SDK's WebRTC media pipeline. The
+WebRTC path is fragile on low-power hosts — on a Raspberry Pi its bidirectional
+audio chain can fail to negotiate and take the video stream down with it — and it
+is unnecessary overhead for a one-frame operation.
+
+Direct capture requires the daemon to have released the camera: the app sets
+``request_media_backend = "no_media"`` by default, which triggers the SDK's
+``release_media()`` so the device is free. The Reachy Mini camera device is
+auto-detected (by its V4L2 name); ``MEENOW_CAMERA_DEVICE`` overrides it. Setting
+``MEENOW_MEDIA_BACKEND=default`` re-enables the SDK media stream as the source.
 """
 
 from __future__ import annotations
 
+import glob
 import logging
+import os
 from datetime import datetime
 
 import numpy as np
@@ -16,40 +25,74 @@ import numpy as np
 log = logging.getLogger(__name__)
 
 _JPEG_QUALITY = 92  # matches meenow's canvas.toBlob('image/jpeg', 0.92)
+_CAMERA_NAME_HINTS = ("reachy", "mini")
 
 
-def capture_frame(reachy_mini, *, allow_synthetic: bool, device: str | None = None) -> np.ndarray:
+def _video_device_names() -> dict[str, str]:
+    """Map ``/dev/videoN`` → V4L2 device name (Linux; empty on other platforms)."""
+    out: dict[str, str] = {}
+    for name_path in sorted(glob.glob("/sys/class/video4linux/video*/name")):
+        try:
+            with open(name_path, encoding="utf-8") as fh:
+                name = fh.read().strip()
+        except OSError:
+            continue
+        dev = "/dev/" + os.path.basename(os.path.dirname(name_path))
+        out[dev] = name
+    return out
+
+
+def detect_reachy_camera() -> list[str]:
+    """Candidate ``/dev/videoN`` nodes whose V4L2 name looks like the Reachy camera.
+
+    Returns them lowest-index first; the metadata node (e.g. ``video1``) simply
+    yields no frames and is skipped by ``capture_frame``.
+    """
+    names = _video_device_names()
+    matches = [d for d, n in names.items() if any(h in n.lower() for h in _CAMERA_NAME_HINTS)]
+    return sorted(matches)
+
+
+def resolve_devices(explicit: str | None, auto: bool) -> list[str]:
+    """Devices to try: an explicit override, else auto-detection when enabled."""
+    if explicit:
+        return [explicit]
+    return detect_reachy_camera() if auto else []
+
+
+def capture_frame(
+    reachy_mini, *, allow_synthetic: bool, devices: list[str] | None = None
+) -> np.ndarray:
     """Return a BGR ``uint8`` frame.
 
-    Tries, in order: the SDK media stream (``reachy_mini.media.get_frame()``); a
-    direct camera device via OpenCV when ``device`` is set (used with
-    ``MEENOW_MEDIA_BACKEND=no_media`` on hosts where the WebRTC media pipeline is
-    unavailable, e.g. a Raspberry Pi where the audio chain fails to negotiate); and
-    finally a synthetic placeholder when ``allow_synthetic`` is set.
+    Tries each local ``devices`` entry (OpenCV), then the SDK media stream
+    (``reachy_mini.media.get_frame()``, only populated when
+    ``MEENOW_MEDIA_BACKEND=default``), then a synthetic placeholder when
+    ``allow_synthetic`` is set.
     """
+    for dev in devices or []:
+        log.info("Capturing from camera device %s", dev)
+        frame = capture_from_device(dev)
+        if frame is not None and frame.size:
+            return np.asarray(frame, dtype=np.uint8)
+        log.warning("Capture from device %s failed.", dev)
+
     media = getattr(reachy_mini, "media", None)
     if media is not None:
         try:
             frame = media.get_frame()
             if frame is not None and np.asarray(frame).any():
                 return np.asarray(frame, dtype=np.uint8)
-            log.warning("Camera stream returned an empty frame.")
         except Exception as exc:  # noqa: BLE001 - defensive: camera backends vary
-            log.warning("Camera stream failed: %s", exc)
-
-    if device is not None:
-        log.info("Trying direct camera capture from device %s", device)
-        frame = capture_from_device(device)
-        if frame is not None and frame.size:
-            return np.asarray(frame, dtype=np.uint8)
-        log.warning("Direct capture from device %s failed.", device)
+            log.warning("SDK media stream failed: %s", exc)
 
     if allow_synthetic:
         log.info("Using synthetic placeholder frame.")
         return synthetic_frame()
     raise RuntimeError(
-        "Camera unavailable (media stream empty and no working MEENOW_CAMERA_DEVICE) "
-        "and synthetic frames are not allowed."
+        "No camera frame available (no working device, SDK media stream empty) "
+        "and synthetic frames are not allowed. Set MEENOW_CAMERA_DEVICE or "
+        "MEENOW_MEDIA_BACKEND=default."
     )
 
 
@@ -63,8 +106,8 @@ def capture_from_device(device: str, warmup: int = 5):
     """Grab a BGR frame directly from a camera via OpenCV, or ``None`` on failure.
 
     Reads a few frames to let auto-exposure settle. Intended for use after the
-    daemon has released the camera (``MEENOW_MEDIA_BACKEND=no_media`` triggers the
-    SDK's ``release_media()``), so the device is free for direct access.
+    daemon has released the camera (the default ``no_media`` backend does this),
+    so the device is free for direct access.
     """
     try:
         import cv2

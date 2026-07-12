@@ -42,7 +42,9 @@ class MeenowApp(ReachyMiniApp):
     """Reachy Mini Apps entry point for the meenow daily-photo app."""
 
     custom_app_url = None  # config is environment-variable only; no web UI
-    request_media_backend = "default"  # opt into camera access for capture
+    # Default: release the camera so we capture directly (see camera.py). Set
+    # MEENOW_MEDIA_BACKEND=default to use the SDK's WebRTC/LOCAL media stream instead.
+    request_media_backend = "no_media"
 
     def run(self, reachy_mini: ReachyMini, stop_event: threading.Event) -> None:
         logging.basicConfig(
@@ -100,10 +102,13 @@ class MeenowApp(ReachyMiniApp):
     def _capture_and_post(self, cfg: Config, client, reachy_mini,
                           stop_event: threading.Event) -> str | None:
         gestures.get_ready(reachy_mini, stop_event)
+        devices = camera.resolve_devices(
+            cfg.camera_device, auto=cfg.media_backend == "no_media"
+        )
         frame = camera.capture_frame(
             reachy_mini,
             allow_synthetic=cfg.dry_run or cfg.allow_synthetic,
-            device=cfg.camera_device,
+            devices=devices,
         )
         jpeg = camera.encode_jpeg(frame)
         if cfg.dry_run or client is None:
@@ -120,9 +125,9 @@ class MeenowApp(ReachyMiniApp):
 
 
 def main() -> None:
-    # "default" (LOCAL IPC camera) on the real robot; "no_media" for headless
-    # testing without a camera (the capture pipeline uses a synthetic frame).
-    MeenowApp.request_media_backend = os.environ.get("MEENOW_MEDIA_BACKEND", "default")
+    # Default "no_media": the daemon releases the camera and we capture directly.
+    # "default" re-enables the SDK's WebRTC/LOCAL media stream as the source.
+    MeenowApp.request_media_backend = os.environ.get("MEENOW_MEDIA_BACKEND", "no_media")
     app = MeenowApp()
     try:
         app.wrapped_run()

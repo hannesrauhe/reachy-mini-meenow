@@ -58,7 +58,8 @@ See [`.env.example`](.env.example). Required (unless `MEENOW_DRY_RUN=true`):
 | `MEENOW_CATCHUP_MINUTES` | *(optional)* late-post window, default 120; `0` = always |
 | `MEENOW_DRY_RUN` | *(dev)* log the post instead of sending |
 | `MEENOW_POST_NOW` | *(dev)* fire one capture immediately, ignoring the schedule |
-| `MEENOW_MEDIA_BACKEND` | *(dev)* `default` (real camera) or `no_media` (headless) |
+| `MEENOW_CAMERA_DEVICE` | *(optional)* camera device to capture from (`/dev/videoN` or index); auto-detected by default |
+| `MEENOW_MEDIA_BACKEND` | *(optional)* `no_media` (default, direct capture) or `default` (SDK WebRTC/LOCAL media stream) |
 | `MEENOW_ALLOW_SYNTHETIC` | *(dev)* allow the placeholder frame in a real post (test without a camera) |
 
 > The dedicated account must be **locked** (manually approve followers) for the
@@ -96,12 +97,14 @@ reachy-mini-meenow
 In production the app is discovered via its `reachy_mini_apps` entry point and
 launched from the robot dashboard.
 
-## Running the daemon on a Raspberry Pi (aarch64)
+## Running on a Raspberry Pi (aarch64)
 
-The Reachy Mini daemon needs the GStreamer Rust WebRTC plugin, which is slow to
-compile on a Pi. See [`docs/gstreamer-webrtc-arm64.md`](docs/gstreamer-webrtc-arm64.md)
-to build it off-device — via the GitHub Action (download prebuilt binaries) or a
-local Docker cross-build — and install it on the Pi.
+meenow captures the photo **directly** from the local camera (auto-detecting the
+Reachy Mini video device) and does not use the SDK's WebRTC media stream, so it runs
+on a Pi out of the box — no camera configuration and no GStreamer WebRTC plugin
+required for this app. See [`docs/gstreamer-webrtc-arm64.md`](docs/gstreamer-webrtc-arm64.md)
+for details, the optional `MEENOW_CAMERA_DEVICE` override, and how to build the
+WebRTC plugin off-device if you run **other** Reachy Mini apps that need it.
 
 ## Tests
 
@@ -113,3 +116,4 @@ pytest
 `tests/test_trigger.py` verifies the trigger-math parity (including the 32-bit
 masking regression that would otherwise cluster every June-2026 day at ~16:50).
 `tests/test_pixelfed.py` verifies the media/status request shapes.
+`tests/test_camera.py` verifies device auto-detection and the capture fallback order.

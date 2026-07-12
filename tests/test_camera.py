@@ -1,4 +1,4 @@
-"""Tests for camera frame selection and the direct-capture fallback."""
+"""Tests for camera frame selection, device detection, and direct capture."""
 
 import numpy as np
 import pytest
@@ -25,29 +25,54 @@ def test_parse_device_numeric_vs_path():
     assert camera._parse_device("/dev/video0") == "/dev/video0"
 
 
-def test_uses_media_frame_when_present():
-    frame = np.ones((4, 4, 3), dtype=np.uint8)
-    out = camera.capture_frame(_Robot(frame), allow_synthetic=False)
+def test_detect_reachy_camera_matches_by_name(monkeypatch):
+    listing = {
+        "/dev/video0": "Reachy Mini Camera: Reachy Mini",
+        "/dev/video1": "Reachy Mini Camera: Reachy Mini",
+        "/dev/video10": "bcm2835-codec-decode",
+        "/dev/video13": "bcm2835-isp",
+    }
+    monkeypatch.setattr(camera, "_video_device_names", lambda: listing)
+    assert camera.detect_reachy_camera() == ["/dev/video0", "/dev/video1"]
+
+
+def test_resolve_devices_explicit_overrides_autodetect(monkeypatch):
+    monkeypatch.setattr(camera, "detect_reachy_camera", lambda: ["/dev/video0"])
+    assert camera.resolve_devices("/dev/video7", auto=True) == ["/dev/video7"]
+    assert camera.resolve_devices(None, auto=True) == ["/dev/video0"]
+    assert camera.resolve_devices(None, auto=False) == []
+
+
+def test_device_capture_preferred_over_media(monkeypatch):
+    dev_frame = np.full((2, 2, 3), 7, dtype=np.uint8)
+    media_frame = np.ones((4, 4, 3), dtype=np.uint8)
+    monkeypatch.setattr(camera, "capture_from_device", lambda dev, **k: dev_frame)
+    out = camera.capture_frame(_Robot(media_frame), allow_synthetic=False, devices=["/dev/video0"])
+    assert np.array_equal(out, dev_frame)
+
+
+def test_falls_back_to_media_when_no_device(monkeypatch):
+    media_frame = np.ones((4, 4, 3), dtype=np.uint8)
+    out = camera.capture_frame(_Robot(media_frame), allow_synthetic=False, devices=[])
     assert out.shape == (4, 4, 3)
 
 
-def test_empty_stream_without_device_or_synthetic_raises():
+def test_device_failure_then_media(monkeypatch):
+    monkeypatch.setattr(camera, "capture_from_device", lambda dev, **k: None)
+    media_frame = np.ones((4, 4, 3), dtype=np.uint8)
+    out = camera.capture_frame(_Robot(media_frame), allow_synthetic=False, devices=["/dev/videoX"])
+    assert out.shape == (4, 4, 3)
+
+
+def test_nothing_available_raises():
     with pytest.raises(RuntimeError):
-        camera.capture_frame(_Robot(None), allow_synthetic=False)
+        camera.capture_frame(_Robot(None), allow_synthetic=False, devices=[])
 
 
-def test_empty_stream_falls_back_to_synthetic_when_allowed():
-    out = camera.capture_frame(_Robot(None), allow_synthetic=True)
+def test_synthetic_when_allowed():
+    out = camera.capture_frame(_Robot(None), allow_synthetic=True, devices=[])
     assert out.dtype == np.uint8 and out.ndim == 3 and out.any()
 
 
 def test_direct_capture_bad_device_returns_none():
-    # A nonexistent device must fail gracefully, not raise.
     assert camera.capture_from_device("/dev/does-not-exist", warmup=1) is None
-
-
-def test_empty_stream_tries_device_then_synthetic(monkeypatch):
-    sentinel = np.full((2, 2, 3), 7, dtype=np.uint8)
-    monkeypatch.setattr(camera, "capture_from_device", lambda dev, **k: sentinel)
-    out = camera.capture_frame(_Robot(None), allow_synthetic=False, device="/dev/video9")
-    assert np.array_equal(out, sentinel)
