@@ -18,6 +18,7 @@ from __future__ import annotations
 import glob
 import logging
 import os
+import time
 from datetime import datetime
 
 import numpy as np
@@ -102,29 +103,47 @@ def _parse_device(device: str):
     return int(s) if s.isdigit() else s
 
 
-def capture_from_device(device: str, warmup: int = 5):
+def capture_from_device(device: str, settle_s: float = 2.5, min_std: float = 5.0):
     """Grab a BGR frame directly from a camera via OpenCV, or ``None`` on failure.
 
-    Reads a few frames to let auto-exposure settle. Intended for use after the
-    daemon has released the camera (the default ``no_media`` backend does this),
-    so the device is free for direct access.
+    A freshly (re)opened USB camera streams blank/greyscale frames for a moment
+    while it starts up and auto-exposure settles — especially on a Pi after the
+    daemon released it. So we read for up to ``settle_s`` seconds and return the
+    first 3-channel frame whose pixel spread (``std``) clears ``min_std`` (i.e. an
+    actual image, not a flat grey placeholder), keeping the best frame seen as a
+    fallback. A single-channel frame is promoted to BGR so the JPEG is not encoded
+    greyscale.
     """
     try:
         import cv2
     except ImportError:
         log.warning("OpenCV not available for direct capture.")
         return None
-    cap = cv2.VideoCapture(_parse_device(device))
+
+    dev = _parse_device(device)
+    cap = cv2.VideoCapture(dev, cv2.CAP_V4L2) if isinstance(dev, str) else cv2.VideoCapture(dev)
     if not cap.isOpened():
         cap.release()
         return None
     try:
-        frame = None
-        for _ in range(max(1, warmup)):
+        best = None
+        best_std = -1.0
+        deadline = time.monotonic() + max(0.1, settle_s)
+        while time.monotonic() < deadline:
             ok, f = cap.read()
             if ok and f is not None and getattr(f, "size", 0):
-                frame = f
-        return frame
+                std = float(f.std())
+                if std > best_std:
+                    best, best_std = f, std
+                if f.ndim == 3 and f.shape[2] == 3 and std >= min_std:
+                    return f
+            time.sleep(0.05)
+        if best is None:
+            return None
+        if best.ndim == 2 or (best.ndim == 3 and best.shape[2] == 1):
+            best = cv2.cvtColor(best.reshape(best.shape[0], best.shape[1]), cv2.COLOR_GRAY2BGR)
+        log.warning("Camera frame looked flat (std=%.1f); using best available.", best_std)
+        return best
     finally:
         cap.release()
 

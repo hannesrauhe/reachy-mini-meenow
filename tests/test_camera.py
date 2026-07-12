@@ -75,4 +75,4 @@ def test_synthetic_when_allowed():
 
 
 def test_direct_capture_bad_device_returns_none():
-    assert camera.capture_from_device("/dev/does-not-exist", warmup=1) is None
+    assert camera.capture_from_device("/dev/does-not-exist", settle_s=0.1) is None
