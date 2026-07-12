@@ -18,22 +18,72 @@ log = logging.getLogger(__name__)
 _JPEG_QUALITY = 92  # matches meenow's canvas.toBlob('image/jpeg', 0.92)
 
 
-def capture_frame(reachy_mini, *, allow_synthetic: bool) -> np.ndarray:
-    """Return a BGR ``uint8`` frame. Falls back to a synthetic frame when allowed."""
+def capture_frame(reachy_mini, *, allow_synthetic: bool, device: str | None = None) -> np.ndarray:
+    """Return a BGR ``uint8`` frame.
+
+    Tries, in order: the SDK media stream (``reachy_mini.media.get_frame()``); a
+    direct camera device via OpenCV when ``device`` is set (used with
+    ``MEENOW_MEDIA_BACKEND=no_media`` on hosts where the WebRTC media pipeline is
+    unavailable, e.g. a Raspberry Pi where the audio chain fails to negotiate); and
+    finally a synthetic placeholder when ``allow_synthetic`` is set.
+    """
     media = getattr(reachy_mini, "media", None)
     if media is not None:
         try:
             frame = media.get_frame()
             if frame is not None and np.asarray(frame).any():
                 return np.asarray(frame, dtype=np.uint8)
-            log.warning("Camera returned an empty frame.")
+            log.warning("Camera stream returned an empty frame.")
         except Exception as exc:  # noqa: BLE001 - defensive: camera backends vary
-            log.warning("Camera capture failed: %s", exc)
+            log.warning("Camera stream failed: %s", exc)
+
+    if device is not None:
+        log.info("Trying direct camera capture from device %s", device)
+        frame = capture_from_device(device)
+        if frame is not None and frame.size:
+            return np.asarray(frame, dtype=np.uint8)
+        log.warning("Direct capture from device %s failed.", device)
 
     if allow_synthetic:
         log.info("Using synthetic placeholder frame.")
         return synthetic_frame()
-    raise RuntimeError("Camera unavailable and synthetic frames are not allowed.")
+    raise RuntimeError(
+        "Camera unavailable (media stream empty and no working MEENOW_CAMERA_DEVICE) "
+        "and synthetic frames are not allowed."
+    )
+
+
+def _parse_device(device: str):
+    """Return an int index for numeric strings, else the path/string as-is."""
+    s = str(device).strip()
+    return int(s) if s.isdigit() else s
+
+
+def capture_from_device(device: str, warmup: int = 5):
+    """Grab a BGR frame directly from a camera via OpenCV, or ``None`` on failure.
+
+    Reads a few frames to let auto-exposure settle. Intended for use after the
+    daemon has released the camera (``MEENOW_MEDIA_BACKEND=no_media`` triggers the
+    SDK's ``release_media()``), so the device is free for direct access.
+    """
+    try:
+        import cv2
+    except ImportError:
+        log.warning("OpenCV not available for direct capture.")
+        return None
+    cap = cv2.VideoCapture(_parse_device(device))
+    if not cap.isOpened():
+        cap.release()
+        return None
+    try:
+        frame = None
+        for _ in range(max(1, warmup)):
+            ok, f = cap.read()
+            if ok and f is not None and getattr(f, "size", 0):
+                frame = f
+        return frame
+    finally:
+        cap.release()
 
 
 def synthetic_frame(size: tuple[int, int] = (480, 640)) -> np.ndarray:

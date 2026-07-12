@@ -74,6 +74,48 @@ aarch64 environment.
    *"Failed to create webrtcsink element. Is the GStreamer webrtc rust plugin
    installed?"* is resolved.
 
+## Troubleshooting: media pipeline fails on the Pi
+
+Symptom — the app connects, then dies with a GStreamer error and an empty frame:
+
+```
+ERROR ... webrtc_client_gstreamer: gst-stream-error-quark: Internal data stream error. (1)
+  .../GstAudioTestSrc:send_silence: streaming stopped, reason not-negotiated (-4)
+WARNING ... camera: Camera stream returned an empty frame.
+RuntimeError: Camera unavailable ...
+```
+
+The SDK's `default` backend uses the fast **LOCAL IPC** camera only when the socket
+`/tmp/reachymini_camera_socket` exists; otherwise it falls back to **WebRTC**, whose
+client always builds a bidirectional **audio** chain. When that audio chain fails to
+negotiate the whole pipeline errors, so the video frame never arrives. This is inside
+the `reachy_mini` media stack, not this app.
+
+Try, in order:
+
+1. **Get the LOCAL (no-audio) path.** With the daemon running, `ls -l
+   /tmp/reachymini_camera_socket`. If it is missing, restart the daemon (after the
+   plugin is installed); once the socket exists the app uses LOCAL IPC and never
+   touches the audio/WebRTC chain.
+2. **Check the audio elements** the WebRTC chain needs:
+   ```bash
+   for e in audiotestsrc audiomixer audioconvert audioresample opusenc rtpopuspay webrtcbin; do
+     printf '%-12s ' "$e"; gst-inspect-1.0 "$e" >/dev/null 2>&1 && echo OK || echo MISSING
+   done
+   ```
+   Install whatever is MISSING (`opusenc` → `gstreamer1.0-plugins-base`, `rtpopuspay`
+   → `gstreamer1.0-plugins-good`, `audiomixer` → `gstreamer1.0-plugins-bad`).
+3. **Bypass the media pipeline entirely** (this app only needs a still photo). Run
+   with the daemon releasing the camera and capture it directly via OpenCV:
+   ```bash
+   MEENOW_MEDIA_BACKEND=no_media MEENOW_CAMERA_DEVICE=/dev/video0 \
+   MEENOW_PIXELFED_INSTANCE=… MEENOW_PIXELFED_TOKEN=… MEENOW_POST_NOW=true \
+   reachy-mini-meenow
+   ```
+   `no_media` makes the SDK release the camera; the app then grabs the frame from
+   `MEENOW_CAMERA_DEVICE` (a `/dev/videoN` path or a numeric index) with no WebRTC or
+   audio involved. Find the device with `v4l2-ctl --list-devices` (or `ls /dev/video*`).
+
 ## Notes
 
 - **Version match**: build the plugin against the same GStreamer major/minor as the

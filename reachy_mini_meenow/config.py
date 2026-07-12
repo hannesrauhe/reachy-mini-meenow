@@ -49,6 +49,7 @@ class Config:
     dry_run: bool
     post_now: bool
     allow_synthetic: bool
+    camera_device: str | None
     catchup_min: int
     state_file: Path
 
@@ -63,6 +64,7 @@ def load_config() -> Config:
     dry_run = _truthy(os.environ.get("MEENOW_DRY_RUN"))
     post_now = _truthy(os.environ.get("MEENOW_POST_NOW"))
     allow_synthetic = _truthy(os.environ.get("MEENOW_ALLOW_SYNTHETIC"))
+    camera_device = os.environ.get("MEENOW_CAMERA_DEVICE", "").strip() or None
 
     catchup_raw = os.environ.get("MEENOW_CATCHUP_MINUTES", "120").strip()
     try:
@@ -97,6 +99,7 @@ def load_config() -> Config:
         dry_run=dry_run,
         post_now=post_now,
         allow_synthetic=allow_synthetic,
+        camera_device=camera_device,
         catchup_min=catchup_min,
         state_file=state_file,
     )
