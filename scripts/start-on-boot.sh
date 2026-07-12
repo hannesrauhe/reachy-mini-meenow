@@ -6,15 +6,27 @@
 # journald captures and rotates it. For crontab use, redirect yourself:
 #   @reboot /home/pi/reachy-mini-meenow/scripts/start-on-boot.sh 2>&1 | logger -t meenow
 #
-# Assumes the repo was set up with `python -m venv .venv && pip install -e .`
-# and a `.env` file in the repo root (loaded by the app itself). Override
-# locations via MEENOW_HOME / MEENOW_VENV / MEENOW_DAEMON_ARGS.
+# The virtualenv is auto-detected in the repo root (.reachy_mini_env, then
+# .venv); a `.env` file there is loaded by the app itself. Override locations
+# via MEENOW_HOME / MEENOW_VENV / MEENOW_DAEMON_ARGS.
 
 set -u
 
 MEENOW_HOME="${MEENOW_HOME:-$(cd "$(dirname "$0")/.." && pwd)}"
-MEENOW_VENV="${MEENOW_VENV:-$MEENOW_HOME/.venv}"
 DAEMON_URL="${MEENOW_DAEMON_URL:-http://localhost:8000/}"
+
+if [ -z "${MEENOW_VENV:-}" ]; then
+    for cand in "$MEENOW_HOME/.reachy_mini_env" "$MEENOW_HOME/.venv"; do
+        if [ -f "$cand/bin/activate" ]; then
+            MEENOW_VENV="$cand"
+            break
+        fi
+    done
+fi
+if [ -z "${MEENOW_VENV:-}" ] || [ ! -f "$MEENOW_VENV/bin/activate" ]; then
+    echo "No virtualenv found (looked for .reachy_mini_env and .venv in $MEENOW_HOME); set MEENOW_VENV." >&2
+    exit 1
+fi
 
 echo "start-on-boot: home=$MEENOW_HOME venv=$MEENOW_VENV"
 

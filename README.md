@@ -116,8 +116,10 @@ launched from the robot dashboard.
 
 [`scripts/start-on-boot.sh`](scripts/start-on-boot.sh) activates the venv,
 starts `reachy-mini-daemon` (skipped when one is already reachable on
-`localhost:8000`), waits for it to come up, and runs the app. All output goes
-to stdout/stderr; `.env` is picked up from the repo root as usual.
+`localhost:8000`), waits for it to come up, and runs the app. The virtualenv
+is auto-detected in the repo root (`.reachy_mini_env`, then `.venv`; override
+with `MEENOW_VENV`). All output goes to stdout/stderr; `.env` is picked up
+from the repo root as usual.
 
 The recommended way to run it is the systemd unit
 [`scripts/meenow.service`](scripts/meenow.service): journald captures and
