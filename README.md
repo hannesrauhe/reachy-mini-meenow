@@ -18,10 +18,14 @@ own. At the same pseudo-random daily **trigger time** the meenow PWA prompts its
 users, the robot:
 
 1. performs a short "get-ready" gesture and faces the camera,
-2. captures a photo,
-3. posts it to a **dedicated Pixelfed account** as a followers-only
-   (`visibility: private`) status tagged `#meenowApp`, and
-4. plays a small celebratory gesture.
+2. captures a surroundings photo,
+3. turns body and head 90° to the right (towards a physical mirror placed next to
+   the robot) and slightly down, and captures a mirror selfie,
+4. stitches the two like the meenow PWA (selfie as a rounded inset on the
+   surroundings shot),
+5. posts the composite plus both source photos to a **dedicated Pixelfed account**
+   as a followers-only (`visibility: private`) status tagged `#meenowApp`, and
+6. plays a small celebratory gesture.
 
 Followers of that account then see the daily photo in their meenow feed — the app
 reuses meenow's exact trigger math and post format, so no changes to meenow are
@@ -61,6 +65,9 @@ See [`.env.example`](.env.example). Required (unless `MEENOW_DRY_RUN=true`):
 | `MEENOW_CAMERA_DEVICE` | *(optional)* camera device to capture from (`/dev/videoN` or index); auto-detected by default |
 | `MEENOW_MEDIA_BACKEND` | *(optional)* `no_media` (default, direct capture) or `default` (SDK WebRTC/LOCAL media stream) |
 | `MEENOW_ALLOW_SYNTHETIC` | *(dev)* allow the placeholder frame in a real post (test without a camera) |
+| `MEENOW_MIRROR_YAW_DEG` | *(optional)* body/head yaw for the mirror selfie, default `-90` (negative = right) |
+| `MEENOW_MIRROR_PITCH_DEG` | *(optional)* head pitch for the mirror selfie, default `10` (positive = down) |
+| `MEENOW_MIRROR_FLIP` | *(optional)* horizontally un-mirror the selfie, default `true` |
 
 > The dedicated account must be **locked** (manually approve followers) for the
 > photos to stay followers-only; approve your meenow friends from Pixelfed or the
@@ -116,4 +123,5 @@ pytest
 `tests/test_trigger.py` verifies the trigger-math parity (including the 32-bit
 masking regression that would otherwise cluster every June-2026 day at ~16:50).
 `tests/test_pixelfed.py` verifies the media/status request shapes.
-`tests/test_camera.py` verifies device auto-detection and the capture fallback order.
+`tests/test_camera.py` verifies device auto-detection, the capture fallback order,
+and the stitch geometry.

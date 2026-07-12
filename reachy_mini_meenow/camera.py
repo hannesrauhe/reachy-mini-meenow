@@ -210,6 +210,55 @@ def synthetic_frame(size: tuple[int, int] = (480, 640)) -> np.ndarray:
     return frame
 
 
+def _rounded_rect_mask(cv2, shape: tuple[int, int], x: int, y: int,
+                       w: int, h: int, r: int) -> np.ndarray:
+    mask = np.zeros(shape, dtype=np.uint8)
+    r = max(0, min(r, w // 2, h // 2))
+    cv2.rectangle(mask, (x + r, y), (x + w - r, y + h), 255, -1)
+    cv2.rectangle(mask, (x, y + r), (x + w, y + h - r), 255, -1)
+    for cx, cy in ((x + r, y + r), (x + w - r, y + r), (x + r, y + h - r), (x + w - r, y + h - r)):
+        cv2.circle(mask, (cx, cy), r, 255, -1)
+    return mask
+
+
+def stitch_photos(back: np.ndarray, front: np.ndarray, *, flip_front: bool = False) -> np.ndarray:
+    """Composite the selfie as a rounded inset onto the surroundings shot.
+
+    Ports meenow's ``stitchPhotos`` canvas geometry (``src/screens/capture.ts``):
+    inset 35% of the back frame's width in the top-left corner, 3% padding, 8%
+    corner radius, 5px white border. ``flip_front`` un-mirrors a photo taken via
+    a physical mirror so it reads like a normal selfie.
+    """
+    import cv2
+
+    if flip_front:
+        front = front[:, ::-1]
+    h, w = back.shape[:2]
+    inset_w = round(w * 0.35)
+    inset_h = round(inset_w * front.shape[0] / front.shape[1])
+    pad = round(w * 0.03)
+    r = round(inset_w * 0.08)
+    border = 5
+
+    out = back.copy()
+    inset = cv2.resize(front, (inset_w, inset_h))
+
+    outer = _rounded_rect_mask(
+        cv2, (h, w), pad - border, pad - border,
+        inset_w + 2 * border, inset_h + 2 * border, r + border,
+    )
+    out[outer > 0] = 255
+
+    inner = _rounded_rect_mask(cv2, (h, w), pad, pad, inset_w, inset_h, r)
+    eh = min(inset_h, h - pad)
+    ew = min(inset_w, w - pad)
+    if eh > 0 and ew > 0:
+        roi = out[pad:pad + eh, pad:pad + ew]
+        m = inner[pad:pad + eh, pad:pad + ew] > 0
+        roi[m] = inset[:eh, :ew][m]
+    return out
+
+
 def encode_jpeg(bgr: np.ndarray, quality: int = _JPEG_QUALITY) -> bytes:
     """Encode a BGR frame to JPEG bytes (OpenCV, with a PIL fallback)."""
     try:

@@ -1,8 +1,10 @@
 """meenow Reachy Mini app.
 
 At the daily meenow trigger time the robot performs a get-ready gesture, captures a
-photo, posts it to a dedicated Pixelfed account as a followers-only ``#meenowApp``
-status, and celebrates. Followers then see the photo in the meenow PWA feed.
+surroundings photo, turns to a side mirror for a selfie, stitches the two like the
+meenow PWA (selfie inset on the surroundings shot), and posts the composite plus both
+source photos to a dedicated Pixelfed account as a followers-only ``#meenowApp``
+status, then celebrates. Followers see the photos in the meenow PWA feed.
 """
 
 from __future__ import annotations
@@ -105,20 +107,38 @@ class MeenowApp(ReachyMiniApp):
         devices = camera.resolve_devices(
             cfg.camera_device, auto=cfg.media_backend == "no_media"
         )
-        frame = camera.capture_frame(
-            reachy_mini,
-            allow_synthetic=cfg.dry_run or cfg.allow_synthetic,
-            devices=devices,
+        allow_synthetic = cfg.dry_run or cfg.allow_synthetic
+        back = camera.capture_frame(
+            reachy_mini, allow_synthetic=allow_synthetic, devices=devices
         )
-        jpeg = camera.encode_jpeg(frame)
+        if stop_event.is_set():
+            return None
+
+        # Selfie via the mirror to the right: turn body+head 90° right, tilt down.
+        gestures.look_at_mirror(
+            reachy_mini, stop_event,
+            yaw_deg=cfg.mirror_yaw_deg, pitch_deg=cfg.mirror_pitch_deg,
+        )
+        try:
+            front = camera.capture_frame(
+                reachy_mini, allow_synthetic=allow_synthetic, devices=devices
+            )
+        finally:
+            gestures.go_neutral(reachy_mini)
+
+        composite = camera.stitch_photos(back, front, flip_front=cfg.mirror_flip)
+        composite_jpeg = camera.encode_jpeg(composite)
+        back_jpeg = camera.encode_jpeg(back)
+        front_jpeg = camera.encode_jpeg(front)
         if cfg.dry_run or client is None:
             log.info(
-                "DRY_RUN would POST visibility=private, %d bytes, status=%r",
-                len(jpeg), build_status_text(cfg.caption),
+                "DRY_RUN would POST visibility=private, %d+%d+%d bytes, status=%r",
+                len(composite_jpeg), len(back_jpeg), len(front_jpeg),
+                build_status_text(cfg.caption),
             )
             url = None
         else:
-            url = client.post_photo(jpeg, cfg.caption, alt="meenow — daily photo")
+            url = client.post_meenow(composite_jpeg, back_jpeg, front_jpeg, cfg.caption)
             log.info("Posted: %s", url)
         gestures.celebrate(reachy_mini, stop_event)
         return url
