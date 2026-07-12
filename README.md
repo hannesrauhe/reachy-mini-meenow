@@ -126,9 +126,22 @@ crontab -e
 ```
 
 Paths are overridable via `MEENOW_HOME`, `MEENOW_VENV`, `MEENOW_DAEMON_ARGS`
-(e.g. `--sim`), and `MEENOW_DAEMON_URL`. For automatic restarts after a crash,
-a systemd service (`Restart=on-failure`, `ExecStart=` pointing at the script)
-is the sturdier alternative to cron; the script works unchanged in both.
+(e.g. `--sim`), and `MEENOW_DAEMON_URL`.
+
+For automatic restarts after a crash, use the systemd unit
+[`scripts/meenow.service`](scripts/meenow.service) instead of cron (the same
+script backs both). Adjust `User=` and the path in `ExecStart=`, then:
+
+```
+sudo cp scripts/meenow.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now meenow.service   # start now + on every boot
+journalctl -u meenow -f                      # follow the logs
+```
+
+`Restart=on-failure` restarts daemon + app if either crashes; `systemctl stop
+meenow` shuts both down cleanly (the script's exit trap stops the daemon it
+started).
 
 ## Running on a Raspberry Pi (aarch64)
 

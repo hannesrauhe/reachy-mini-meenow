@@ -1,0 +1,24 @@
+# systemd unit for the meenow Reachy Mini app.
+# Install (adjust user/paths to your setup first):
+#   sudo cp scripts/meenow.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now meenow.service
+# Logs: journalctl -u meenow -f   (plus logs/ in the repo root)
+
+[Unit]
+Description=meenow Reachy Mini daily-photo app (daemon + app)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+ExecStart=/home/pi/reachy-mini-meenow/scripts/start-on-boot.sh
+# The script stops the daemon it started via its EXIT trap on SIGTERM.
+KillMode=mixed
+TimeoutStopSec=20
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
