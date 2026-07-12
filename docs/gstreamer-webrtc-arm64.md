@@ -93,6 +93,11 @@ entirely by not using the media stream.
 
 - The Reachy Mini camera node is auto-detected by its V4L2 name; override with
   `MEENOW_CAMERA_DEVICE=/dev/video0` (list devices with `v4l2-ctl --list-devices`).
+- Capture requests **MJPG** at 1920×1080 by default (colour, decoded by the camera's
+  pipeline) and lets auto-exposure settle before grabbing the frame. Override with
+  `MEENOW_CAMERA_FOURCC` (e.g. `YUYV`, or empty for the driver default) and
+  `MEENOW_CAMERA_RESOLUTION` (e.g. `3840x2160`). Check supported modes with
+  `v4l2-ctl -d /dev/video0 --list-formats-ext`.
 - To use the SDK media stream instead of direct capture, set
   `MEENOW_MEDIA_BACKEND=default` (requires the WebRTC plugin and a working audio
   negotiation).
