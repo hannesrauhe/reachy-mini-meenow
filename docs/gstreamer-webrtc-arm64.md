@@ -7,8 +7,9 @@ files build it **off-device** and let you drop the result onto the Pi.
 
 Target: **Raspberry Pi OS 64-bit (Debian trixie), aarch64.** The plugin is built
 inside a `debian:trixie` arm64 container so its glibc and GStreamer (1.26) match the
-Pi exactly. Pinned to `gst-plugins-rs` tag **0.14.1** and plugin `gst-plugin-webrtc`,
-per the [official Reachy Mini instructions](https://huggingface.co/docs/reachy_mini/en/SDK/gstreamer-installation).
+Pi exactly. Pinned to `gst-plugins-rs` tag **0.14.5** and plugin `gst-plugin-webrtc`,
+per the [official Reachy Mini instructions](https://huggingface.co/docs/reachy_mini/en/SDK/gstreamer-installation)
+(0.14.5 ships a critical `webrtcsink` deadlock fix).
 
 ## Option A — GitHub Action (download prebuilt binaries)
 
@@ -18,7 +19,7 @@ The repo is public, so the workflow runs on a free native arm64 runner.
    set a different `gst-plugins-rs` tag). When it finishes, download the
    **`gst-plugin-webrtc-aarch64-trixie`** artifact — a
    `gst-plugins-rs-<tag>-aarch64-linux-gnu.tar.gz`.
-2. Or push a tag `gst-webrtc-<tag>` (e.g. `gst-webrtc-0.14.1`) to also attach the
+2. Or push a tag `gst-webrtc-<tag>` (e.g. `gst-webrtc-0.14.5`) to also attach the
    tarball to a GitHub **Release**.
 
 > If your fork cannot use arm64 runners, build locally with Option B instead.
@@ -31,10 +32,10 @@ runs natively.
 ```bash
 # one-time on x86_64: enable arm64 emulation (the script does this automatically)
 scripts/build-gst-webrtc-in-docker.sh
-# -> writes dist/gst-plugins-rs-0.14.1-aarch64-linux-gnu.tar.gz
+# -> writes dist/gst-plugins-rs-0.14.5-aarch64-linux-gnu.tar.gz
 
 # knobs:
-GST_PLUGINS_RS_TAG=0.14.1 PLUGINS="gst-plugin-webrtc" scripts/build-gst-webrtc-in-docker.sh
+GST_PLUGINS_RS_TAG=0.14.5 PLUGINS="gst-plugin-webrtc" scripts/build-gst-webrtc-in-docker.sh
 ```
 
 `scripts/build-gst-webrtc.sh` is the inner build (apt deps → rustup → cargo-c →
@@ -46,9 +47,9 @@ aarch64 environment.
 1. Copy and extract the tarball into `/opt` (it unpacks to `/opt/gst-plugins-rs`):
 
    ```bash
-   scp gst-plugins-rs-0.14.1-aarch64-linux-gnu.tar.gz pi@reachy-mini.local:/tmp/
+   scp gst-plugins-rs-0.14.5-aarch64-linux-gnu.tar.gz pi@reachy-mini.local:/tmp/
    ssh pi@reachy-mini.local
-   sudo tar -C /opt -xzf /tmp/gst-plugins-rs-0.14.1-aarch64-linux-gnu.tar.gz
+   sudo tar -C /opt -xzf /tmp/gst-plugins-rs-0.14.5-aarch64-linux-gnu.tar.gz
    ```
 
 2. Install the GStreamer **runtime** packages the plugin needs at run time (the

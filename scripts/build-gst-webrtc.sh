@@ -7,14 +7,14 @@
 #   https://huggingface.co/docs/reachy_mini/en/SDK/gstreamer-installation
 #
 # Env overrides:
-#   GST_PLUGINS_RS_TAG  gst-plugins-rs git tag           (default: 0.14.1)
+#   GST_PLUGINS_RS_TAG  gst-plugins-rs git tag           (default: 0.14.5)
 #   PLUGINS             space-separated cargo -p packages (default: gst-plugin-webrtc)
 #   PREFIX              install prefix                    (default: /opt/gst-plugins-rs)
 #   OUTDIR              where the tarball is written      (default: $PWD/dist)
 #   JOBS                cargo --jobs N (set 1 on low-RAM hosts; default: unset)
 set -euo pipefail
 
-GST_PLUGINS_RS_TAG="${GST_PLUGINS_RS_TAG:-0.14.1}"
+GST_PLUGINS_RS_TAG="${GST_PLUGINS_RS_TAG:-0.14.5}"
 PLUGINS="${PLUGINS:-gst-plugin-webrtc}"
 PREFIX="${PREFIX:-/opt/gst-plugins-rs}"
 OUTDIR="${OUTDIR:-$PWD/dist}"

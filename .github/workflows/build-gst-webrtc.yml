@@ -12,11 +12,11 @@ on:
     inputs:
       gst_plugins_rs_tag:
         description: "gst-plugins-rs git tag"
-        default: "0.14.1"
+        default: "0.14.5"
         type: string
   push:
     tags:
-      - "gst-webrtc-*"   # pushing e.g. gst-webrtc-0.14.1 publishes a Release
+      - "gst-webrtc-*"   # pushing e.g. gst-webrtc-0.14.5 publishes a Release
 
 jobs:
   build:
@@ -27,7 +27,7 @@ jobs:
       - name: Build in debian:trixie (arm64) container
         run: bash scripts/build-gst-webrtc-in-docker.sh
         env:
-          GST_PLUGINS_RS_TAG: ${{ inputs.gst_plugins_rs_tag || '0.14.1' }}
+          GST_PLUGINS_RS_TAG: ${{ inputs.gst_plugins_rs_tag || '0.14.5' }}
           OUTDIR: ${{ github.workspace }}/dist
 
       - name: Upload artifact
