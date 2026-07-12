@@ -74,6 +74,34 @@ aarch64 environment.
    *"Failed to create webrtcsink element. Is the GStreamer webrtc rust plugin
    installed?"* is resolved.
 
+## Does this app still need the WebRTC plugin?
+
+**No.** The app captures the photo **directly** from the local camera (its default
+`no_media` backend releases the camera and it reads the device with OpenCV — see
+`reachy_mini_meenow/camera.py`), so it never uses the SDK's WebRTC media stream. The
+build/download above is still useful if you run **other** Reachy Mini apps
+(conversation, telepresence) or want the daemon's full media server; it is harmless
+to keep installed but is not required for meenow.
+
+Background: the SDK's `default` media backend only uses the fast LOCAL IPC camera
+when `/tmp/reachymini_camera_socket` exists; otherwise it falls back to WebRTC, whose
+client builds a bidirectional **audio** chain that can fail to negotiate on the Pi
+(`not-negotiated`) and take the video stream down with it. meenow sidesteps that
+entirely by not using the media stream.
+
+### Camera notes
+
+- The Reachy Mini camera node is auto-detected by its V4L2 name; override with
+  `MEENOW_CAMERA_DEVICE=/dev/video0` (list devices with `v4l2-ctl --list-devices`).
+- Capture requests **MJPG** at 1920×1080 by default (colour, decoded by the camera's
+  pipeline) and lets auto-exposure settle before grabbing the frame. Override with
+  `MEENOW_CAMERA_FOURCC` (e.g. `YUYV`, or empty for the driver default) and
+  `MEENOW_CAMERA_RESOLUTION` (e.g. `3840x2160`). Check supported modes with
+  `v4l2-ctl -d /dev/video0 --list-formats-ext`.
+- To use the SDK media stream instead of direct capture, set
+  `MEENOW_MEDIA_BACKEND=default` (requires the WebRTC plugin and a working audio
+  negotiation).
+
 ## Notes
 
 - **Version match**: build the plugin against the same GStreamer major/minor as the
