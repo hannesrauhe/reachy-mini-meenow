@@ -51,19 +51,13 @@ def look_at_mirror(reachy_mini, stop_event: threading.Event,
                    duration: float = 1.5, settle_s: float = 1.0) -> None:
     """Turn body+head towards the side mirror and tilt slightly down for the selfie.
 
-    The yaw goes to the body when the SDK supports ``body_yaw`` (the head stays
-    straight relative to it); otherwise the head alone yaws. ``settle_s`` lets the
-    motion damp out before the capture.
+    The head pose is world-framed, so the head gets the full yaw itself; the body
+    follows with the same ``body_yaw`` where the SDK supports it (head-only turn
+    otherwise). ``settle_s`` lets the motion damp out before the capture.
     """
     log.info("look_at_mirror: yaw=%.0f° pitch=%.0f°", yaw_deg, pitch_deg)
-    pose = create_head_pose(yaw=0.0, pitch=pitch_deg, roll=0.0, degrees=True, mm=True)
-    try:
-        reachy_mini.goto_target(
-            head=pose, body_yaw=float(np.deg2rad(yaw_deg)), duration=duration
-        )
-    except TypeError:
-        pose = create_head_pose(yaw=yaw_deg, pitch=pitch_deg, roll=0.0, degrees=True, mm=True)
-        reachy_mini.goto_target(head=pose, duration=duration)
+    pose = create_head_pose(yaw=yaw_deg, pitch=pitch_deg, roll=0.0, degrees=True, mm=True)
+    _goto(reachy_mini, pose, body_yaw_deg=yaw_deg, duration=duration)
     end = time.time() + max(0.0, settle_s)
     while time.time() < end and not stop_event.is_set():
         time.sleep(0.05)
