@@ -74,6 +74,35 @@ def test_synthetic_when_allowed():
     assert out.dtype == np.uint8 and out.ndim == 3 and out.any()
 
 
+def test_stitch_photos_geometry_and_content():
+    back = np.full((360, 640, 3), 20, dtype=np.uint8)
+    front = np.full((360, 640, 3), 200, dtype=np.uint8)
+    out = camera.stitch_photos(back, front)
+    assert out.shape == back.shape
+    # untouched far corner
+    assert (out[-1, -1] == 20).all()
+    # inset centre carries the front frame
+    pad = round(640 * 0.03)
+    inset_w = round(640 * 0.35)
+    inset_h = round(inset_w * 360 / 640)
+    assert (out[pad + inset_h // 2, pad + inset_w // 2] == 200).all()
+    # white border just outside the inset
+    assert (out[pad - 2, pad + inset_w // 2] == 255).all()
+
+
+def test_stitch_photos_flip_front():
+    back = np.zeros((100, 200, 3), dtype=np.uint8)
+    front = np.zeros((100, 200, 3), dtype=np.uint8)
+    front[:, :100] = 250  # left half bright -> flipped becomes right half of inset
+    out = camera.stitch_photos(back, front, flip_front=True)
+    pad = round(200 * 0.03)
+    inset_w = round(200 * 0.35)
+    inset_h = round(inset_w * 100 / 200)
+    y = pad + inset_h // 2
+    assert (out[y, pad + inset_w - inset_w // 4] == 250).all()
+    assert (out[y, pad + inset_w // 4] == 0).all()
+
+
 def test_direct_capture_bad_device_returns_none():
     assert camera.capture_from_device("/dev/does-not-exist", settle_s=0.1) is None
 

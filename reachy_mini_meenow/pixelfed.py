@@ -98,6 +98,18 @@ class PixelfedClient:
         media_id = self.upload_media(jpeg, alt)
         return self.post_status([media_id], caption)
 
+    def post_meenow(self, composite: bytes, back: bytes, front: bytes,
+                    caption: str | None) -> str:
+        """Post the stitched composite plus both source photos, like the PWA's postMeenow.
+
+        The composite is uploaded first so it gets the lowest attachment id and
+        appears first in the gallery; alt texts match the PWA's.
+        """
+        composite_id = self.upload_media(composite, "meenow — daily photo")
+        back_id = self.upload_media(back, "meenow — surroundings")
+        front_id = self.upload_media(front, "meenow — selfie")
+        return self.post_status([composite_id, back_id, front_id], caption)
+
 
 def build_status_text(caption: str | None) -> str:
     caption = (caption or "").strip()

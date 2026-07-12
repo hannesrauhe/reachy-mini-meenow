@@ -53,6 +53,9 @@ class Config:
     camera_device: str | None
     catchup_min: int
     state_file: Path
+    mirror_yaw_deg: float
+    mirror_pitch_deg: float
+    mirror_flip: bool
 
 
 def load_config() -> Config:
@@ -73,6 +76,18 @@ def load_config() -> Config:
         catchup_min = int(catchup_raw)
     except ValueError:
         catchup_min = 120
+
+    def _float_env(name: str, default: float) -> float:
+        try:
+            return float(os.environ.get(name, "").strip() or default)
+        except ValueError:
+            return default
+
+    # Mirror-selfie pose: negative yaw turns right, positive pitch tilts down.
+    mirror_yaw_deg = _float_env("MEENOW_MIRROR_YAW_DEG", -90.0)
+    mirror_pitch_deg = _float_env("MEENOW_MIRROR_PITCH_DEG", 10.0)
+    mirror_flip_raw = os.environ.get("MEENOW_MIRROR_FLIP", "").strip()
+    mirror_flip = _truthy(mirror_flip_raw) if mirror_flip_raw else True
 
     state_env = os.environ.get("MEENOW_STATE_FILE", "").strip()
     state_file = Path(state_env) if state_env else _default_state_file()
@@ -105,6 +120,9 @@ def load_config() -> Config:
         camera_device=camera_device,
         catchup_min=catchup_min,
         state_file=state_file,
+        mirror_yaw_deg=mirror_yaw_deg,
+        mirror_pitch_deg=mirror_pitch_deg,
+        mirror_flip=mirror_flip,
     )
 
 

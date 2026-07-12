@@ -78,6 +78,23 @@ def test_upload_media_raises_on_error_status():
         assert "400" in str(exc)
 
 
+def test_post_meenow_uploads_composite_first_with_pwa_alts():
+    client = _FakeClient([
+        _FakeResponse(payload={"id": "1", "url": "u"}),
+        _FakeResponse(payload={"id": "2", "url": "u"}),
+        _FakeResponse(payload={"id": "3", "url": "u"}),
+        _FakeResponse(payload={"url": "https://pixelfed.social/p/9"}),
+    ])
+    px = PixelfedClient("pixelfed.social", "tok", client=client)
+    url = px.post_meenow(b"comp", b"back", b"front", None)
+    assert url == "https://pixelfed.social/p/9"
+    alts = [c[2]["data"]["description"] for c in client.calls[:3]]
+    assert alts == ["meenow — daily photo", "meenow — surroundings", "meenow — selfie"]
+    status_body = client.calls[3][2]["json"]
+    assert status_body["media_ids"] == ["1", "2", "3"]
+    assert status_body["visibility"] == "private"
+
+
 def test_post_status_body_is_private_with_tag():
     client = _FakeClient([_FakeResponse(payload={"url": "https://pixelfed.social/p/1"})])
     px = PixelfedClient("pixelfed.social", "tok", client=client)
