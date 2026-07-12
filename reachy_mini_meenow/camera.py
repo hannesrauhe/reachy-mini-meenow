@@ -103,19 +103,42 @@ def _parse_device(device: str):
     return int(s) if s.isdigit() else s
 
 
+def _to_bgr(cv2, f):
+    """Normalise an OpenCV frame to 3-channel BGR, or ``None`` if not possible.
+
+    Handles the raw formats the V4L2 backend can return when it does not convert:
+    single-channel grey and 2-channel packed YUYV.
+    """
+    if f is None or not getattr(f, "size", 0):
+        return None
+    if f.ndim == 2:
+        return cv2.cvtColor(f, cv2.COLOR_GRAY2BGR)
+    if f.ndim == 3:
+        c = f.shape[2]
+        if c == 3:
+            return f
+        if c == 1:
+            return cv2.cvtColor(f.reshape(f.shape[0], f.shape[1]), cv2.COLOR_GRAY2BGR)
+        if c == 2:
+            try:
+                return cv2.cvtColor(f, cv2.COLOR_YUV2BGR_YUYV)
+            except cv2.error:
+                return None
+    return None
+
+
 def capture_from_device(device: str, settle_s: float = 3.0, min_std: float = 5.0,
                         skip_s: float = 0.6):
     """Grab a BGR frame directly from a camera via OpenCV, or ``None`` on failure.
 
-    Requests **MJPG** at a fixed resolution so the frame is decoded to colour by the
-    camera's own pipeline (its default format can otherwise be read as a single grey
-    channel). A freshly (re)opened USB camera also needs a moment for auto-exposure
-    to converge — grabbing too early yields blank or over-bright frames — so we skip
-    the first ``skip_s`` seconds, sample until ``settle_s``, and keep the *last*
-    3-channel frame whose pixel spread (``std``) clears ``min_std`` (AE is most
-    settled at the end). Overridable via ``MEENOW_CAMERA_FOURCC`` (default ``MJPG``,
-    empty to leave the driver default) and ``MEENOW_CAMERA_RESOLUTION`` (default
-    ``1920x1080``, e.g. ``3840x2160`` or empty to leave as-is).
+    Forces RGB conversion (``CAP_PROP_CONVERT_RGB``) and requests **MJPG** at a fixed
+    resolution so frames are decoded to colour — without this the V4L2 backend can
+    hand back the raw luma plane, yielding a greyscale image. A freshly (re)opened
+    USB camera also needs a moment for auto-exposure to converge, so we skip the
+    first ``skip_s`` seconds, sample until ``settle_s``, and keep the *last* frame
+    whose pixel spread (``std``) clears ``min_std``. Overridable via
+    ``MEENOW_CAMERA_FOURCC`` (default ``MJPG``) and ``MEENOW_CAMERA_RESOLUTION``
+    (default ``1920x1080``).
     """
     try:
         import cv2
@@ -129,6 +152,7 @@ def capture_from_device(device: str, settle_s: float = 3.0, min_std: float = 5.0
         cap.release()
         return None
     try:
+        cap.set(cv2.CAP_PROP_CONVERT_RGB, 1.0)  # decode YUYV/MJPG to BGR, not raw
         fourcc = os.environ.get("MEENOW_CAMERA_FOURCC", "MJPG").strip()
         if fourcc:
             cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*fourcc[:4]))
@@ -147,25 +171,21 @@ def capture_from_device(device: str, settle_s: float = 3.0, min_std: float = 5.0
         start = time.monotonic()
         deadline = start + max(0.2, settle_s)
         while time.monotonic() < deadline:
-            ok, f = cap.read()
-            if ok and f is not None and getattr(f, "size", 0):
-                std = float(f.std())
+            ok, raw = cap.read()
+            frame = _to_bgr(cv2, raw) if ok else None
+            if frame is not None:
+                std = float(frame.std())
                 if std > best_std:
-                    best, best_std = f, std
-                if (time.monotonic() - start >= skip_s
-                        and f.ndim == 3 and f.shape[2] == 3 and std >= min_std):
-                    last_good = f
+                    best, best_std = frame, std
+                if time.monotonic() - start >= skip_s and std >= min_std:
+                    last_good = frame
             time.sleep(0.03)
 
         frame = last_good if last_good is not None else best
         if frame is None:
             return None
-        if frame.ndim == 2 or (frame.ndim == 3 and frame.shape[2] == 1):
-            frame = cv2.cvtColor(
-                frame.reshape(frame.shape[0], frame.shape[1]), cv2.COLOR_GRAY2BGR
-            )
         if last_good is None:
-            log.warning("No settled colour frame (best std=%.1f); using best available.", best_std)
+            log.warning("No settled frame (best std=%.1f); using best available.", best_std)
         return frame
     finally:
         cap.release()

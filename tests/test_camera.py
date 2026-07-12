@@ -76,3 +76,22 @@ def test_synthetic_when_allowed():
 
 def test_direct_capture_bad_device_returns_none():
     assert camera.capture_from_device("/dev/does-not-exist", settle_s=0.1) is None
+
+
+def test_to_bgr_normalises_raw_frames():
+    import cv2
+
+    gray2d = np.full((4, 4), 100, dtype=np.uint8)
+    out = camera._to_bgr(cv2, gray2d)
+    assert out.shape == (4, 4, 3)
+
+    gray1c = np.full((4, 4, 1), 100, dtype=np.uint8)
+    assert camera._to_bgr(cv2, gray1c).shape == (4, 4, 3)
+
+    bgr = np.zeros((4, 4, 3), dtype=np.uint8)
+    assert camera._to_bgr(cv2, bgr) is bgr  # already BGR, passthrough
+
+    yuyv = np.full((4, 4, 2), 128, dtype=np.uint8)  # packed YUYV -> converted
+    assert camera._to_bgr(cv2, yuyv).shape[2] == 3
+
+    assert camera._to_bgr(cv2, None) is None
