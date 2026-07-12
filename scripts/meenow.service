@@ -3,7 +3,8 @@
 #   sudo cp scripts/meenow.service /etc/systemd/system/
 #   sudo systemctl daemon-reload
 #   sudo systemctl enable --now meenow.service
-# Logs: journalctl -u meenow -f   (plus logs/ in the repo root)
+# Logs: journalctl -u meenow -f  (journald rotates automatically; tune with
+# SystemMaxUse= in /etc/systemd/journald.conf if the daemon gets chatty)
 
 [Unit]
 Description=meenow Reachy Mini daily-photo app (daemon + app)

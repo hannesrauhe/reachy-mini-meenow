@@ -2,8 +2,9 @@
 # Boot launcher for the meenow Reachy Mini app: activates the venv, starts the
 # daemon (unless one is already running), waits for it, then runs the app.
 #
-# Intended for crontab:
-#   @reboot /home/pi/reachy-mini-meenow/scripts/start-on-boot.sh
+# All output goes to stdout/stderr — under systemd (scripts/meenow.service)
+# journald captures and rotates it. For crontab use, redirect yourself:
+#   @reboot /home/pi/reachy-mini-meenow/scripts/start-on-boot.sh 2>&1 | logger -t meenow
 #
 # Assumes the repo was set up with `python -m venv .venv && pip install -e .`
 # and a `.env` file in the repo root (loaded by the app itself). Override
@@ -14,11 +15,8 @@ set -u
 MEENOW_HOME="${MEENOW_HOME:-$(cd "$(dirname "$0")/.." && pwd)}"
 MEENOW_VENV="${MEENOW_VENV:-$MEENOW_HOME/.venv}"
 DAEMON_URL="${MEENOW_DAEMON_URL:-http://localhost:8000/}"
-LOG_DIR="$MEENOW_HOME/logs"
-mkdir -p "$LOG_DIR"
 
-exec >>"$LOG_DIR/start-on-boot.log" 2>&1
-echo "=== $(date -Is) start-on-boot (home=$MEENOW_HOME) ==="
+echo "start-on-boot: home=$MEENOW_HOME venv=$MEENOW_VENV"
 
 # shellcheck disable=SC1091
 source "$MEENOW_VENV/bin/activate"
@@ -32,7 +30,7 @@ if daemon_up; then
 else
     echo "Starting reachy-mini-daemon..."
     # shellcheck disable=SC2086
-    reachy-mini-daemon ${MEENOW_DAEMON_ARGS:-} >>"$LOG_DIR/daemon.log" 2>&1 &
+    reachy-mini-daemon ${MEENOW_DAEMON_ARGS:-} &
     DAEMON_PID=$!
 fi
 
@@ -49,16 +47,18 @@ trap cleanup EXIT INT TERM
 for _ in $(seq 1 60); do
     daemon_up && break
     if [ -n "$DAEMON_PID" ] && ! kill -0 "$DAEMON_PID" 2>/dev/null; then
-        echo "Daemon exited during startup; see $LOG_DIR/daemon.log"
+        echo "Daemon exited during startup." >&2
         exit 1
     fi
     sleep 1
 done
 if ! daemon_up; then
-    echo "Daemon did not become reachable at $DAEMON_URL within 60s."
+    echo "Daemon did not become reachable at $DAEMON_URL within 60s." >&2
     exit 1
 fi
 echo "Daemon is up; starting the meenow app."
 
-reachy-mini-meenow >>"$LOG_DIR/app.log" 2>&1
-echo "App exited with status $? at $(date -Is)."
+reachy-mini-meenow
+rc=$?
+echo "App exited with status $rc."
+exit "$rc"

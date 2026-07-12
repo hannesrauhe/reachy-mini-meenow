@@ -116,21 +116,14 @@ launched from the robot dashboard.
 
 [`scripts/start-on-boot.sh`](scripts/start-on-boot.sh) activates the venv,
 starts `reachy-mini-daemon` (skipped when one is already reachable on
-`localhost:8000`), waits for it to come up, and runs the app. Logs go to
-`logs/{start-on-boot,daemon,app}.log` in the repo root; `.env` is picked up
-from there as usual. Add it to the crontab of the user owning the venv:
+`localhost:8000`), waits for it to come up, and runs the app. All output goes
+to stdout/stderr; `.env` is picked up from the repo root as usual.
 
-```
-crontab -e
-@reboot /home/pi/reachy-mini-meenow/scripts/start-on-boot.sh
-```
-
-Paths are overridable via `MEENOW_HOME`, `MEENOW_VENV`, `MEENOW_DAEMON_ARGS`
-(e.g. `--sim`), and `MEENOW_DAEMON_URL`.
-
-For automatic restarts after a crash, use the systemd unit
-[`scripts/meenow.service`](scripts/meenow.service) instead of cron (the same
-script backs both). Adjust `User=` and the path in `ExecStart=`, then:
+The recommended way to run it is the systemd unit
+[`scripts/meenow.service`](scripts/meenow.service): journald captures and
+rotates the logs (the daemon logs a lot — tune `SystemMaxUse=` in
+`/etc/systemd/journald.conf` if needed) and the app restarts after a crash.
+Adjust `User=` and the path in `ExecStart=`, then:
 
 ```
 sudo cp scripts/meenow.service /etc/systemd/system/
@@ -139,9 +132,16 @@ sudo systemctl enable --now meenow.service   # start now + on every boot
 journalctl -u meenow -f                      # follow the logs
 ```
 
-`Restart=on-failure` restarts daemon + app if either crashes; `systemctl stop
-meenow` shuts both down cleanly (the script's exit trap stops the daemon it
-started).
+`systemctl stop meenow` shuts daemon and app down cleanly (the script's exit
+trap stops the daemon it started). Alternatively, from crontab — pipe to
+syslog since cron discards output:
+
+```
+@reboot /home/pi/reachy-mini-meenow/scripts/start-on-boot.sh 2>&1 | logger -t meenow
+```
+
+Paths are overridable via `MEENOW_HOME`, `MEENOW_VENV`, `MEENOW_DAEMON_ARGS`
+(e.g. `--sim`), and `MEENOW_DAEMON_URL`.
 
 ## Running on a Raspberry Pi (aarch64)
 
