@@ -96,6 +96,13 @@ reachy-mini-meenow
 In production the app is discovered via its `reachy_mini_apps` entry point and
 launched from the robot dashboard.
 
+## Running the daemon on a Raspberry Pi (aarch64)
+
+The Reachy Mini daemon needs the GStreamer Rust WebRTC plugin, which is slow to
+compile on a Pi. See [`docs/gstreamer-webrtc-arm64.md`](docs/gstreamer-webrtc-arm64.md)
+to build it off-device — via the GitHub Action (download prebuilt binaries) or a
+local Docker cross-build — and install it on the Pi.
+
 ## Tests
 
 ```bash

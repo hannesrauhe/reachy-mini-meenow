@@ -1,0 +1,44 @@
+name: Build GStreamer WebRTC plugin (aarch64)
+
+# Builds the gst-plugins-rs WebRTC plugin for aarch64 so it can be downloaded and
+# dropped onto a Raspberry Pi (Raspberry Pi OS 64-bit / Debian trixie) running the
+# Reachy Mini daemon — no compiling on the Pi. See docs/gstreamer-webrtc-arm64.md.
+#
+# Runs on a native arm64 runner (free for public repos) and builds inside a
+# debian:trixie container so glibc + GStreamer match the Pi exactly.
+
+on:
+  workflow_dispatch:
+    inputs:
+      gst_plugins_rs_tag:
+        description: "gst-plugins-rs git tag"
+        default: "0.14.1"
+        type: string
+  push:
+    tags:
+      - "gst-webrtc-*"   # pushing e.g. gst-webrtc-0.14.1 publishes a Release
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm    # native aarch64; falls back below if unavailable
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build in debian:trixie (arm64) container
+        run: bash scripts/build-gst-webrtc-in-docker.sh
+        env:
+          GST_PLUGINS_RS_TAG: ${{ inputs.gst_plugins_rs_tag || '0.14.1' }}
+          OUTDIR: ${{ github.workspace }}/dist
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gst-plugin-webrtc-aarch64-trixie
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+      - name: Publish release (on tag)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.tar.gz
