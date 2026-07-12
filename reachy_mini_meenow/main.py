@@ -21,6 +21,7 @@ from .config import Config, load_config, resolve_tz
 from .pixelfed import PixelfedClient, build_status_text
 from .state import load_posted_trigger_ms, save_posted_trigger_ms
 from .trigger import TriggerClock
+from .trigger_touch import AntennaTrigger
 
 log = logging.getLogger(__name__)
 
@@ -38,6 +39,18 @@ def _interruptible_sleep(total_ms: int, stop_event: threading.Event) -> None:
         step = min(_POLL_MS, total_ms - slept)
         time.sleep(step / 1000)
         slept += step
+
+
+def _wait_or_touch(total_ms: int, stop_event: threading.Event,
+                   trigger: AntennaTrigger | None) -> bool:
+    """Sleep like ``_interruptible_sleep`` but poll the antenna trigger; True if it fired."""
+    step_s = 0.2
+    end = time.monotonic() + total_ms / 1000
+    while time.monotonic() < end and not stop_event.is_set():
+        if trigger is not None and trigger.check():
+            return True
+        time.sleep(step_s)
+    return False
 
 
 class MeenowApp(ReachyMiniApp):
@@ -63,6 +76,7 @@ class MeenowApp(ReachyMiniApp):
             log.info("DRY_RUN: no Pixelfed credentials required.")
 
         posted_ms = load_posted_trigger_ms(cfg.state_file)
+        touch = AntennaTrigger(reachy_mini, cfg.touch_threshold_deg) if cfg.touch_trigger else None
 
         try:
             if cfg.post_now:
@@ -71,6 +85,12 @@ class MeenowApp(ReachyMiniApp):
                 url = self._capture_and_post(cfg, client, reachy_mini, stop_event)
                 posted_ms = trigger_ms
                 save_posted_trigger_ms(cfg.state_file, trigger_ms, post_url=url)
+            else:
+                gestures.hello(reachy_mini, stop_event)
+                log.info("meenow ready — wiggle an antenna to post.")
+
+            if touch is not None and not touch.arm():
+                touch = None
 
             while not stop_event.is_set():
                 trigger_ms = clock.last_trigger_ms(_now_ms())
@@ -81,6 +101,8 @@ class MeenowApp(ReachyMiniApp):
                 )
                 if fresh and within_catchup:
                     try:
+                        if touch is not None:
+                            touch.disarm()
                         url = self._capture_and_post(
                             cfg, client, reachy_mini, stop_event
                         )
@@ -90,6 +112,9 @@ class MeenowApp(ReachyMiniApp):
                         log.error("Post attempt failed, will retry: %s", exc)
                         _interruptible_sleep(_ERROR_BACKOFF_MS, stop_event)
                         continue
+                    finally:
+                        if touch is not None:
+                            touch.arm()
                 elif fresh:
                     # Missed this period's window; adopt it so we wait for the next.
                     posted_ms = trigger_ms
@@ -97,8 +122,25 @@ class MeenowApp(ReachyMiniApp):
                         "Trigger %d already outside the %d-min window; waiting for next.",
                         trigger_ms, cfg.catchup_min,
                     )
-                _interruptible_sleep(_POLL_MS, stop_event)
+                if _wait_or_touch(_POLL_MS, stop_event, touch):
+                    log.info("Manual antenna trigger: capturing now.")
+                    touch.disarm()
+                    try:
+                        url = self._capture_and_post(
+                            cfg, client, reachy_mini, stop_event
+                        )
+                        # An extra post is fine; only mark a not-yet-posted period.
+                        if posted_ms != trigger_ms:
+                            posted_ms = trigger_ms
+                            save_posted_trigger_ms(cfg.state_file, trigger_ms, post_url=url)
+                    except Exception as exc:  # noqa: BLE001 - keep the loop alive
+                        log.error("Manual post failed: %s", exc)
+                        _interruptible_sleep(_ERROR_BACKOFF_MS, stop_event)
+                    finally:
+                        touch.arm()
         finally:
+            if touch is not None:
+                touch.disarm()
             gestures.go_neutral(reachy_mini)
 
     def _capture_and_post(self, cfg: Config, client, reachy_mini,

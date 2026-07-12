@@ -27,6 +27,12 @@ users, the robot:
    as a followers-only (`visibility: private`) status tagged `#meenowApp`, and
 6. plays a small celebratory gesture.
 
+In scheduled mode the robot waves hello on startup so you can see the app is
+running. While it waits, the antennas are torque-released (they feel loose):
+**wiggle an antenna by hand** to trigger an extra capture at any time — no
+keyboard needed. A manual capture also posts, and counts as the period's post
+when the scheduled one has not fired yet.
+
 Followers of that account then see the daily photo in their meenow feed — the app
 reuses meenow's exact trigger math and post format, so no changes to meenow are
 needed.
@@ -68,6 +74,8 @@ See [`.env.example`](.env.example). Required (unless `MEENOW_DRY_RUN=true`):
 | `MEENOW_MIRROR_YAW_DEG` | *(optional)* body/head yaw for the mirror selfie, default `-90` (negative = right) |
 | `MEENOW_MIRROR_PITCH_DEG` | *(optional)* head pitch for the mirror selfie, default `10` (positive = down) |
 | `MEENOW_MIRROR_FLIP` | *(optional)* horizontally un-mirror the selfie, default `true` |
+| `MEENOW_TOUCH_TRIGGER` | *(optional)* antenna-wiggle manual capture, default `true` |
+| `MEENOW_TOUCH_THRESHOLD_DEG` | *(optional)* antenna deflection that fires it, default `20` |
 
 > The dedicated account must be **locked** (manually approve followers) for the
 > photos to stay followers-only; approve your meenow friends from Pixelfed or the
@@ -103,6 +111,39 @@ reachy-mini-meenow
 
 In production the app is discovered via its `reachy_mini_apps` entry point and
 launched from the robot dashboard.
+
+## Autostart on boot (Raspberry Pi)
+
+[`scripts/start-on-boot.sh`](scripts/start-on-boot.sh) activates the venv,
+starts `reachy-mini-daemon` (skipped when one is already reachable on
+`localhost:8000`), waits for it to come up, and runs the app. The virtualenv
+is auto-detected in the repo root (`.reachy_mini_env`, then `.venv`; override
+with `MEENOW_VENV`). All output goes to stdout/stderr; `.env` is picked up
+from the repo root as usual.
+
+The recommended way to run it is the systemd unit
+[`scripts/meenow.service`](scripts/meenow.service): journald captures and
+rotates the logs (the daemon logs a lot — tune `SystemMaxUse=` in
+`/etc/systemd/journald.conf` if needed) and the app restarts after a crash.
+Adjust `User=` and the path in `ExecStart=`, then:
+
+```
+sudo cp scripts/meenow.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now meenow.service   # start now + on every boot
+journalctl -u meenow -f                      # follow the logs
+```
+
+`systemctl stop meenow` shuts daemon and app down cleanly (the script's exit
+trap stops the daemon it started). Alternatively, from crontab — pipe to
+syslog since cron discards output:
+
+```
+@reboot /home/pi/reachy-mini-meenow/scripts/start-on-boot.sh 2>&1 | logger -t meenow
+```
+
+Paths are overridable via `MEENOW_HOME`, `MEENOW_VENV`, `MEENOW_DAEMON_ARGS`
+(e.g. `--sim`), and `MEENOW_DAEMON_URL`.
 
 ## Running on a Raspberry Pi (aarch64)
 

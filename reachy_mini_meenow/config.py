@@ -56,6 +56,8 @@ class Config:
     mirror_yaw_deg: float
     mirror_pitch_deg: float
     mirror_flip: bool
+    touch_trigger: bool
+    touch_threshold_deg: float
 
 
 def load_config() -> Config:
@@ -88,6 +90,11 @@ def load_config() -> Config:
     mirror_pitch_deg = _float_env("MEENOW_MIRROR_PITCH_DEG", 10.0)
     mirror_flip_raw = os.environ.get("MEENOW_MIRROR_FLIP", "").strip()
     mirror_flip = _truthy(mirror_flip_raw) if mirror_flip_raw else True
+
+    # Manual trigger: wiggle a torque-released antenna to fire a capture.
+    touch_raw = os.environ.get("MEENOW_TOUCH_TRIGGER", "").strip()
+    touch_trigger = _truthy(touch_raw) if touch_raw else True
+    touch_threshold_deg = _float_env("MEENOW_TOUCH_THRESHOLD_DEG", 20.0)
 
     state_env = os.environ.get("MEENOW_STATE_FILE", "").strip()
     state_file = Path(state_env) if state_env else _default_state_file()
@@ -123,6 +130,8 @@ def load_config() -> Config:
         mirror_yaw_deg=mirror_yaw_deg,
         mirror_pitch_deg=mirror_pitch_deg,
         mirror_flip=mirror_flip,
+        touch_trigger=touch_trigger,
+        touch_threshold_deg=touch_threshold_deg,
     )
 
 
