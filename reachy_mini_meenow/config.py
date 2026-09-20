@@ -63,6 +63,9 @@ class Config:
     head_teach: bool
     head_teach_timeout_s: float
     selfie_zoom: float
+    clock_trigger: bool
+    clock_tick_s: float
+    clock_up_deg: float | None
 
 
 def load_config() -> Config:
@@ -122,6 +125,19 @@ def load_config() -> Config:
     # Digital zoom on the selfie: center-crop by this factor, resize back.
     selfie_zoom = max(1.0, _float_env("MEENOW_SELFIE_ZOOM", 1.0))
 
+    # Clock-antenna capture: wind the right antenna down, it ticks back up to 12
+    # and takes the photo. Set false to fall back to the one-antenna tap trigger.
+    clock_raw = os.environ.get("MEENOW_CLOCK", "").strip()
+    clock_trigger = _truthy(clock_raw) if clock_raw else True
+    # Seconds per countdown tick — one per second, five ticks per clock hour.
+    clock_tick_s = max(0.2, _float_env("MEENOW_CLOCK_TICK_S", 1.0))
+    # The 12-o'clock (resting) angle in degrees; unset uses the SDK up pose.
+    clock_up_raw = os.environ.get("MEENOW_CLOCK_UP_DEG", "").strip()
+    try:
+        clock_up_deg = float(clock_up_raw) if clock_up_raw else None
+    except ValueError:
+        clock_up_deg = None
+
     if not dry_run:
         missing = [
             name
@@ -160,6 +176,9 @@ def load_config() -> Config:
         head_teach=head_teach,
         head_teach_timeout_s=head_teach_timeout_s,
         selfie_zoom=selfie_zoom,
+        clock_trigger=clock_trigger,
+        clock_tick_s=clock_tick_s,
+        clock_up_deg=clock_up_deg,
     )
 
 

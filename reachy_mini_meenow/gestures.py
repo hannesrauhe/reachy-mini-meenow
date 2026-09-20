@@ -55,17 +55,37 @@ def read_antennas(reachy_mini) -> list[float] | None:
 UP_ANTENNAS_RAD = [-0.1745, 0.1745]
 
 
+def move_antennas(reachy_mini, targets: list[float], duration: float = 0.8) -> None:
+    """Interpolate the antennas to ``targets`` using antenna-only commands.
+
+    Deliberately *not* ``goto_target``: with ``head=None`` the daemon holds the
+    head at its present **Cartesian** pose through IK for the whole move, and
+    re-solving a joint-space (hand-taught) neutral that way pulls it slightly
+    off — that fight is what looked like a wiggle after the selfie.
+    """
+    start = read_antennas(reachy_mini)
+    if start is None or len(start) != len(targets):
+        return
+    steps = max(1, int(duration / 0.02))
+    for i in range(1, steps + 1):
+        frac = i / steps
+        reachy_mini._set_joint_positions(  # noqa: SLF001
+            antennas_joint_positions=[
+                s + (t - s) * frac for s, t in zip(start, targets)
+            ]
+        )
+        time.sleep(duration / steps)
+
+
 def perk_antennas(reachy_mini, duration: float = 0.8) -> None:
     """Raise the antennas to the near-vertical pose while torque is still on.
 
-    Head and body are explicitly held (``head=None``, ``body_yaw=None``) so the
-    perk-up never disturbs a hand-aimed head pose.
+    Antenna-only (see :func:`move_antennas`), so the perk never disturbs a
+    hand-taught head pose.
     """
     log.info("perk_antennas: raising")
     try:
-        reachy_mini.goto_target(
-            antennas=list(UP_ANTENNAS_RAD), body_yaw=None, duration=duration
-        )
+        move_antennas(reachy_mini, list(UP_ANTENNAS_RAD), duration=duration)
     except Exception as exc:  # noqa: BLE001 - cosmetic, degrade to drooping
         log.warning("perk_antennas failed: %s", exc)
 
@@ -135,24 +155,3 @@ def hello(reachy_mini, stop_event: threading.Event) -> None:
             yaw_amp=25.0, pitch_amp=6.0, antenna_amp_deg=45.0,
             yaw_hz=0.5, antenna_hz=0.8)
     go_neutral(reachy_mini, duration=0.6)
-
-
-def get_ready(reachy_mini, stop_event: threading.Event, countdown_s: int = 3,
-              hold_pose=None) -> None:
-    """A brief attention wiggle, then face the camera and hold for a countdown.
-
-    ``hold_pose`` defaults to :func:`go_neutral`; pass a callable to hold a
-    taught neutral pose instead of the absolute forward-facing one.
-    """
-    log.info("get_ready: wiggle")
-    _wiggle(reachy_mini, stop_event, duration=1.4,
-            yaw_amp=18.0, pitch_amp=8.0, antenna_amp_deg=30.0,
-            yaw_hz=0.7, antenna_hz=1.2)
-    if stop_event.is_set():
-        return
-    (hold_pose or go_neutral)(reachy_mini, duration=0.5)
-    log.info("get_ready: countdown %ds", countdown_s)
-    for _ in range(max(0, countdown_s)):
-        if stop_event.is_set():
-            return
-        time.sleep(1.0)

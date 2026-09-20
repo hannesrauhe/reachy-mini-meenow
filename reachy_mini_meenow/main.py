@@ -10,6 +10,7 @@ status. Followers see the photos in the meenow PWA feed.
 from __future__ import annotations
 
 import logging
+import math
 import os
 import threading
 import time
@@ -21,6 +22,7 @@ from reachy_mini import ReachyMini, ReachyMiniApp
 from . import camera, gestures
 from .antenna_gestures import ONE, UP, AntennaGesture
 from .capture_server import start_capture_server, stop_capture_server
+from .clock_antenna import ClockAntenna
 from .config import Config, load_config, resolve_tz
 from .head_teacher import LOCKED, HeadTeacher
 from .pixelfed import PixelfedClient, build_status_text
@@ -69,14 +71,16 @@ def _interruptible_sleep(total_ms: int, stop_event: threading.Event) -> None:
 
 def _wait_gesture(total_ms: int, stop_event: threading.Event,
                   gesture: AntennaGesture | None,
-                  teacher: HeadTeacher | None) -> bool:
-    """Sleep ~``total_ms`` in steps, driving the teacher and watching for capture.
+                  teacher: HeadTeacher | None,
+                  clock: ClockAntenna | None = None) -> bool:
+    """Sleep ~``total_ms`` in steps, driving the teacher/clock and watching.
 
     Each step polls the antenna gesture and feeds it to the head teacher (so the
-    teach state machine advances even while we idle). Returns True when the
-    single-antenna capture gesture fires — but only while the head is LOCKED, so
-    the transient one-antenna reading while *raising* out of teach mode is not
-    mistaken for a capture.
+    teach state machine advances even while we idle) and ticks the clock-antenna
+    countdown. Returns True when a capture is due: the clock striking twelve,
+    or (clock disabled) the single-antenna tap — but only while the head is
+    LOCKED, so the transient one-antenna reading while *raising* out of teach
+    mode is not mistaken for a capture.
     """
     step_s = 0.2
     end = time.monotonic() + total_ms / 1000
@@ -84,7 +88,10 @@ def _wait_gesture(total_ms: int, stop_event: threading.Event,
         g = gesture.poll() if gesture is not None else UP
         if teacher is not None:
             teacher.update(g)
-        if g == ONE and (teacher is None or teacher.state == LOCKED):
+        if clock is not None:
+            if clock.update() == "strike":
+                return True
+        elif g == ONE and (teacher is None or teacher.state == LOCKED):
             return True
         time.sleep(step_s)
     return False
@@ -103,6 +110,13 @@ class MeenowApp(ReachyMiniApp):
             level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
         )
         cfg = load_config()
+        # The SDK turns automatic body yaw on by default: the daemon then keeps
+        # rotating the body to follow the head's yaw. That fights both the
+        # joint-space neutral lock (a taught head yaw drags the body) and the
+        # explicit body_yaw of the mirror turn — the wiggles before the selfie.
+        # Every move here that needs the body commands it explicitly, so the
+        # automatic controller is switched off for the whole session.
+        reachy_mini.set_automatic_body_yaw(False)
         clock = TriggerClock(resolve_tz(cfg.tz))
         client = None if cfg.dry_run else PixelfedClient(cfg.instance, cfg.token)
 
@@ -114,6 +128,18 @@ class MeenowApp(ReachyMiniApp):
 
         posted_ms = load_posted_trigger_ms(cfg.state_file)
         gesture = AntennaGesture(reachy_mini, cfg.touch_threshold_deg) if cfg.touch_trigger else None
+        antenna_clock = (
+            ClockAntenna(
+                reachy_mini,
+                up_rad=(
+                    None if cfg.clock_up_deg is None
+                    else math.radians(cfg.clock_up_deg)
+                ),
+                tick_s=cfg.clock_tick_s,
+            )
+            if cfg.clock_trigger
+            else None
+        )
         teacher = (
             HeadTeacher(
                 reachy_mini,
@@ -153,7 +179,16 @@ class MeenowApp(ReachyMiniApp):
                 save_posted_trigger_ms(cfg.state_file, trigger_ms, post_url=url)
             else:
                 gestures.hello(reachy_mini, stop_event)
-                log.info("meenow ready — one antenna = post, both = teach the head.")
+                # hello() ends at the absolute forward pose; settle to the
+                # taught neutral (world-neutral if none taught) so the robot
+                # rests where it was last aimed, not only after a capture.
+                if teacher is not None:
+                    teacher.go_to_neutral()
+                log.info(
+                    "meenow ready — %s, both antennas down = teach the head.",
+                    "wind the right antenna to 12 = post" if antenna_clock is not None
+                    else "one antenna = post",
+                )
 
             if gesture is not None and not gesture.arm():
                 gesture = None
@@ -188,9 +223,14 @@ class MeenowApp(ReachyMiniApp):
                         "Trigger %d already outside the %d-min window; waiting for next.",
                         trigger_ms, cfg.catchup_min,
                     )
-                if _wait_gesture(_POLL_MS, stop_event, gesture, teacher):
-                    log.info("Manual capture (one antenna): capturing now.")
-                    gesture.disarm()
+                if _wait_gesture(_POLL_MS, stop_event, gesture, teacher, antenna_clock):
+                    log.info(
+                        "Clock struck twelve: capturing now."
+                        if antenna_clock is not None
+                        else "Manual capture (one antenna): capturing now."
+                    )
+                    if gesture is not None:
+                        gesture.disarm()
                     try:
                         url = self._capture_and_post(
                             cfg, client, reachy_mini, stop_event, teacher=teacher
@@ -203,7 +243,8 @@ class MeenowApp(ReachyMiniApp):
                         log.error("Manual post failed: %s", exc)
                         _interruptible_sleep(_ERROR_BACKOFF_MS, stop_event)
                     finally:
-                        gesture.arm()
+                        if gesture is not None:
+                            gesture.arm()
         finally:
             if teacher is not None:
                 teacher.suspend_for_capture()
@@ -219,15 +260,14 @@ class MeenowApp(ReachyMiniApp):
             # Scripted motion below needs position control; drop out of any soft
             # teach window first (the pose being shaped is discarded).
             teacher.suspend_for_capture()
-        gestures.get_ready(
-            reachy_mini, stop_event,
-            # Hold the taught neutral (not the absolute one) for the first shot.
-            hold_pose=(
-                (lambda _r, duration=0.5: teacher.go_to_neutral(duration))
-                if teacher is not None
-                else None
-            ),
-        )
+        # No pre-photo wiggle: the clock's tick-up is the countdown. Just settle
+        # into the taught neutral (world-neutral if none taught) and hold steady
+        # a moment so the surroundings shot is not blurred by the move.
+        if teacher is not None:
+            teacher.go_to_neutral(0.5)
+        else:
+            gestures.go_neutral(reachy_mini, duration=0.5)
+        _interruptible_sleep(500, stop_event)
         devices = camera.resolve_devices(
             cfg.camera_device, auto=cfg.media_backend == "no_media"
         )

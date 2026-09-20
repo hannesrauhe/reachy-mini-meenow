@@ -17,22 +17,26 @@ daily [meenow](https://meenow.de) photo ritual into something the robot does on 
 own. At the same pseudo-random daily **trigger time** the meenow PWA prompts its
 users, the robot:
 
-1. performs a short "get-ready" gesture and faces the camera,
-2. captures a surroundings photo,
-3. turns body and head 90° to the right (towards a physical mirror placed next to
+1. faces the camera and captures a surroundings photo,
+2. turns body and head 90° to the right (towards a physical mirror placed next to
    the robot) and slightly down, and captures a mirror selfie,
-4. stitches the two like the meenow PWA (selfie as a rounded inset on the
+3. stitches the two like the meenow PWA (selfie as a rounded inset on the
    surroundings shot),
-5. posts the composite plus both source photos to a **dedicated Pixelfed account**
+4. posts the composite plus both source photos to a **dedicated Pixelfed account**
    as a followers-only (`visibility: private`) status tagged `#meenowApp`, and
-6. plays a small celebratory gesture.
+5. slowly returns to its neutral pose with the antennas back up.
 
 In scheduled mode the robot waves hello on startup so you can see the app is
 running. While it waits, the antennas perk up once and are then torque-released
-(they feel loose) and act as a two-way switch:
+(they feel loose) and act as controls:
 
-- **push one antenna** — trigger an extra capture immediately (it also posts,
-  and counts as the period's post when the scheduled one has not fired yet);
+- **wind the right antenna down** — the bot's right antenna is a clock hand, with
+  12 o'clock at the resting (up) pose. Wind it counter-clockwise to an hour (11,
+  10, 9, 8...) and hold it still for a moment, and it ticks back up to 12 **once
+  per second** (five ticks per hour) — the photo is taken when it reaches 12.
+  Winding to 8 o'clock is a 20-second countdown. Push it back down
+  mid-countdown to cancel. (The extra capture also posts, and counts as the
+  period's post when the scheduled one has not fired yet.)
 - **hold both antennas down** — the head goes *soft* (gravity compensation): move
   it wherever you like, then **raise the antennas** to store that as the new
   **neutral** pose — the one the robot returns to after every selfie. If you
@@ -63,6 +67,14 @@ needed.
 - **Once per period** — the trigger epoch of the last posted period is persisted, so
   a restart within the same period does not post twice. A missed window is skipped
   (see `MEENOW_CATCHUP_MINUTES`).
+- **Clock-antenna capture** — the right antenna doubles as a clock hand
+  (`reachy_mini_meenow/clock_antenna.py`): its joint angle maps to a clock hour
+  (12 = the resting up pose), a wound-down position held still for a second
+  commits the countdown, and the hand then steps up one hour per interval until
+  it strikes 12 and the photo fires. It is a plain state machine driven from the
+  poll loop (no thread, so it can't race a capture), and it only winds while the
+  left antenna is up — so *both down* stays the teach gesture. Set
+  `MEENOW_CLOCK=false` to fall back to the plain one-antenna tap trigger.
 - **Antenna gestures** — the torque-released antennas are read as a two-way
   switch (`reachy_mini_meenow/antenna_gestures.py`): their present position is
   compared to the perk-up baseline and classified `up` / `one` / `both`, so a
@@ -100,7 +112,10 @@ See [`.env.example`](.env.example). Required (unless `MEENOW_DRY_RUN=true`):
 | `MEENOW_SELFIE_ZOOM` | *(optional)* digital zoom on the selfie (center-crop factor ≥ 1), default `1` |
 | `MEENOW_HEAD_TEACH` | *(optional)* antenna-gated head teach mode, default `true` (needs daemon `--kinematics-engine Placo`) |
 | `MEENOW_HEAD_TEACH_TIMEOUT_S` | *(optional)* idle time in teach mode before returning to the old neutral, default `10` |
-| `MEENOW_TOUCH_TRIGGER` | *(optional)* antenna gestures (one = capture, both = teach), default `true` |
+| `MEENOW_CLOCK` | *(optional)* clock-antenna capture (wind the right antenna down, it ticks up to 12 = photo), default `true` |
+| `MEENOW_CLOCK_TICK_S` | *(optional)* seconds per tick, default `1` — five ticks per hour, so winding to 8 = 20 s countdown |
+| `MEENOW_CLOCK_UP_DEG` | *(optional)* the 12 o'clock angle in degrees; defaults to the SDK up pose (−10) |
+| `MEENOW_TOUCH_TRIGGER` | *(optional)* antenna gestures (one = capture, both = teach) — the capture trigger only when `MEENOW_CLOCK=false`, default `true` |
 | `MEENOW_TOUCH_THRESHOLD_DEG` | *(optional)* how far a push counts as an antenna deflection, default `20` |
 | `MEENOW_SAVE_DIR` | *(optional)* also write each capture's `back.jpg` / `front.jpg` / `composite.jpg` into a timestamped subfolder here (works with `MEENOW_DRY_RUN` to inspect shots without posting). When set, the app also serves the newest composite on localhost — see below |
 | `MEENOW_VIEWER_PORT` | *(optional)* port for the capture viewer, default `8899` (localhost only) |
