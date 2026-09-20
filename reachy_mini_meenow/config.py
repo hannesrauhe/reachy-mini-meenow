@@ -58,6 +58,7 @@ class Config:
     mirror_flip: bool
     touch_trigger: bool
     touch_threshold_deg: float
+    save_dir: Path | None
 
 
 def load_config() -> Config:
@@ -99,6 +100,11 @@ def load_config() -> Config:
     state_env = os.environ.get("MEENOW_STATE_FILE", "").strip()
     state_file = Path(state_env) if state_env else _default_state_file()
 
+    # When set, every capture writes its JPEGs here (back/front/composite) so
+    # the shots can be inspected without posting — most useful with DRY_RUN.
+    save_dir_env = os.environ.get("MEENOW_SAVE_DIR", "").strip()
+    save_dir = Path(save_dir_env).expanduser() if save_dir_env else None
+
     if not dry_run:
         missing = [
             name
@@ -132,6 +138,7 @@ def load_config() -> Config:
         mirror_flip=mirror_flip,
         touch_trigger=touch_trigger,
         touch_threshold_deg=touch_threshold_deg,
+        save_dir=save_dir,
     )
 
 

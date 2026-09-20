@@ -61,7 +61,7 @@ See [`.env.example`](.env.example). Required (unless `MEENOW_DRY_RUN=true`):
 
 | Variable | Purpose |
 |---|---|
-| `MEENOW_PIXELFED_INSTANCE` | Dedicated account's Pixelfed host (bare, no scheme) |
+| `MEENOW_PIXELFED_INSTANCE` | Dedicated account's Pixelfed host (bare, no scheme) — should be meenow's home instance, `pixelfed.social`, so robot posts are local to the community |
 | `MEENOW_PIXELFED_TOKEN` | Access token for that account (needs the `write` scope) |
 | `MEENOW_TZ` | *(optional)* IANA timezone; defaults to host local time |
 | `MEENOW_CAPTION` | *(optional)* text prepended above the `#meenowApp` tag |
@@ -76,6 +76,7 @@ See [`.env.example`](.env.example). Required (unless `MEENOW_DRY_RUN=true`):
 | `MEENOW_MIRROR_FLIP` | *(optional)* horizontally un-mirror the selfie, default `true` |
 | `MEENOW_TOUCH_TRIGGER` | *(optional)* antenna-wiggle manual capture, default `true` |
 | `MEENOW_TOUCH_THRESHOLD_DEG` | *(optional)* antenna deflection that fires it, default `20` |
+| `MEENOW_SAVE_DIR` | *(optional)* also write each capture's `back.jpg` / `front.jpg` / `composite.jpg` into a timestamped subfolder here (works with `MEENOW_DRY_RUN` to inspect shots without posting) |
 
 > The dedicated account must be **locked** (manually approve followers) for the
 > photos to stay followers-only; approve your meenow friends from Pixelfed or the
@@ -84,7 +85,7 @@ See [`.env.example`](.env.example). Required (unless `MEENOW_DRY_RUN=true`):
 ## Install & run
 
 ```bash
-python -m venv .venv && . .venv/bin/activate
+python -m venv .reachy-venv && . .reachy-venv/bin/activate
 pip install -e .                 # app + runtime deps
 pip install -e ".[sim]"          # + MuJoCo simulator, for development without a robot
 ```
@@ -111,6 +112,20 @@ reachy-mini-meenow
 
 In production the app is discovered via its `reachy_mini_apps` entry point and
 launched from the robot dashboard.
+
+### Viewing captures locally
+
+Pair `MEENOW_SAVE_DIR` with the capture viewer to check the robot's shots
+without posting anything:
+
+```bash
+MEENOW_DRY_RUN=true MEENOW_POST_NOW=true MEENOW_SAVE_DIR=./captures reachy-mini-meenow
+scripts/view-captures.py ./captures      # then open the printed URL
+```
+
+The page always shows the composite from the newest capture folder and
+auto-refreshes, so the next run appears without restarting anything. It serves
+only files from the captures directory (localhost only) — no external links.
 
 ## Autostart on boot (Raspberry Pi)
 

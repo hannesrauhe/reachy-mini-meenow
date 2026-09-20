@@ -1,5 +1,5 @@
 .env
-.venv/
+.reachy-venv/
 __pycache__/
 *.pyc
 *.egg-info/

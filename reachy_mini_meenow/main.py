@@ -13,6 +13,8 @@ import logging
 import os
 import threading
 import time
+from datetime import datetime
+from pathlib import Path
 
 from reachy_mini import ReachyMini, ReachyMiniApp
 
@@ -31,6 +33,23 @@ _ERROR_BACKOFF_MS = 30_000
 
 def _now_ms() -> int:
     return int(time.time() * 1000)
+
+
+def _save_jpegs(save_dir: Path, back: bytes, front: bytes, composite: bytes) -> None:
+    """Write the three JPEGs to ``save_dir`` for inspection (e.g. after a dry run).
+
+    One timestamped subdirectory per capture keeps runs apart; a save failure is
+    logged but never fails the post — the photos are a debugging convenience.
+    """
+    try:
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        out = save_dir / stamp
+        out.mkdir(parents=True, exist_ok=True)
+        for name, data in (("back", back), ("front", front), ("composite", composite)):
+            (out / f"{name}.jpg").write_bytes(data)
+        log.info("Saved photos to %s", out)
+    except OSError as exc:  # noqa: BLE001 - saving must never break the post
+        log.warning("Could not save photos to %s: %s", save_dir, exc)
 
 
 def _interruptible_sleep(total_ms: int, stop_event: threading.Event) -> None:
@@ -172,6 +191,8 @@ class MeenowApp(ReachyMiniApp):
         composite_jpeg = camera.encode_jpeg(composite)
         back_jpeg = camera.encode_jpeg(back)
         front_jpeg = camera.encode_jpeg(front)
+        if cfg.save_dir is not None:
+            _save_jpegs(cfg.save_dir, back_jpeg, front_jpeg, composite_jpeg)
         if cfg.dry_run or client is None:
             log.info(
                 "DRY_RUN would POST visibility=private, %d+%d+%d bytes, status=%r",
