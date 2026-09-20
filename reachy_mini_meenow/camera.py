@@ -259,6 +259,23 @@ def stitch_photos(back: np.ndarray, front: np.ndarray, *, flip_front: bool = Fal
     return out
 
 
+def zoom(frame: np.ndarray, factor: float) -> np.ndarray:
+    """Center-crop digital zoom: keep 1/factor of each dimension, resize back.
+
+    The Reachy Mini camera has no optical zoom, so this is the only way to
+    tighten a shot. ``factor <= 1.0`` returns the frame untouched; the resize
+    back keeps the stitch geometry (and the composite size) unchanged.
+    """
+    if factor <= 1.0:
+        return frame
+    import cv2
+
+    h, w = frame.shape[:2]
+    cw, ch = max(2, round(w / factor)), max(2, round(h / factor))
+    x0, y0 = (w - cw) // 2, (h - ch) // 2
+    return cv2.resize(frame[y0:y0 + ch, x0:x0 + cw], (w, h))
+
+
 def encode_jpeg(bgr: np.ndarray, quality: int = _JPEG_QUALITY) -> bytes:
     """Encode a BGR frame to JPEG bytes (OpenCV, with a PIL fallback)."""
     try:

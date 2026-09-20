@@ -28,10 +28,20 @@ users, the robot:
 6. plays a small celebratory gesture.
 
 In scheduled mode the robot waves hello on startup so you can see the app is
-running. While it waits, the antennas are torque-released (they feel loose):
-**wiggle an antenna by hand** to trigger an extra capture at any time — no
-keyboard needed. A manual capture also posts, and counts as the period's post
-when the scheduled one has not fired yet.
+running. While it waits, the antennas perk up once and are then torque-released
+(they feel loose) and act as a two-way switch:
+
+- **push one antenna** — trigger an extra capture immediately (it also posts,
+  and counts as the period's post when the scheduled one has not fired yet);
+- **hold both antennas down** — the head goes *soft* (gravity compensation): move
+  it wherever you like, then **raise the antennas** to store that as the new
+  **neutral** pose — the one the robot returns to after every selfie. If you
+  move nothing for ~10 s instead, it drifts back to the old neutral and locks.
+
+Teach mode needs the daemon on the Placo kinematics engine
+(`reachy-mini-daemon --kinematics-engine Placo`); without it the head simply
+stays locked and the gesture is ignored. Set `MEENOW_HEAD_TEACH=false` to
+disable it entirely.
 
 Followers of that account then see the daily photo in their meenow feed — the app
 reuses meenow's exact trigger math and post format, so no changes to meenow are
@@ -53,6 +63,19 @@ needed.
 - **Once per period** — the trigger epoch of the last posted period is persisted, so
   a restart within the same period does not post twice. A missed window is skipped
   (see `MEENOW_CATCHUP_MINUTES`).
+- **Antenna gestures** — the torque-released antennas are read as a two-way
+  switch (`reachy_mini_meenow/antenna_gestures.py`): their present position is
+  compared to the perk-up baseline and classified `up` / `one` / `both`, so a
+  single reader can never confuse the capture gesture (one) with the teach
+  gesture (both). Readings are debounced over two polls.
+- **Head teach mode** — a LOCKED/TEACH state machine
+  (`reachy_mini_meenow/head_teacher.py`) driven from the poll loop (no
+  background thread, so it can't race a capture). Both antennas down enables
+  gravity compensation (soft, floats where you leave it — needs the Placo
+  engine); raising them stores the current head pose as the new neutral
+  (persisted, joint-space so the body never follows) and locks it; ~10 s of no
+  movement instead returns to the old neutral. The neutral is what the robot
+  returns to after the selfie.
 
 ## Configuration
 
@@ -74,9 +97,13 @@ See [`.env.example`](.env.example). Required (unless `MEENOW_DRY_RUN=true`):
 | `MEENOW_MIRROR_YAW_DEG` | *(optional)* body/head yaw for the mirror selfie, default `-90` (negative = right) |
 | `MEENOW_MIRROR_PITCH_DEG` | *(optional)* head pitch for the mirror selfie, default `10` (positive = down) |
 | `MEENOW_MIRROR_FLIP` | *(optional)* horizontally un-mirror the selfie, default `true` |
-| `MEENOW_TOUCH_TRIGGER` | *(optional)* antenna-wiggle manual capture, default `true` |
-| `MEENOW_TOUCH_THRESHOLD_DEG` | *(optional)* antenna deflection that fires it, default `20` |
-| `MEENOW_SAVE_DIR` | *(optional)* also write each capture's `back.jpg` / `front.jpg` / `composite.jpg` into a timestamped subfolder here (works with `MEENOW_DRY_RUN` to inspect shots without posting) |
+| `MEENOW_SELFIE_ZOOM` | *(optional)* digital zoom on the selfie (center-crop factor ≥ 1), default `1` |
+| `MEENOW_HEAD_TEACH` | *(optional)* antenna-gated head teach mode, default `true` (needs daemon `--kinematics-engine Placo`) |
+| `MEENOW_HEAD_TEACH_TIMEOUT_S` | *(optional)* idle time in teach mode before returning to the old neutral, default `10` |
+| `MEENOW_TOUCH_TRIGGER` | *(optional)* antenna gestures (one = capture, both = teach), default `true` |
+| `MEENOW_TOUCH_THRESHOLD_DEG` | *(optional)* how far a push counts as an antenna deflection, default `20` |
+| `MEENOW_SAVE_DIR` | *(optional)* also write each capture's `back.jpg` / `front.jpg` / `composite.jpg` into a timestamped subfolder here (works with `MEENOW_DRY_RUN` to inspect shots without posting). When set, the app also serves the newest composite on localhost — see below |
+| `MEENOW_VIEWER_PORT` | *(optional)* port for the capture viewer, default `8899` (localhost only) |
 
 > The dedicated account must be **locked** (manually approve followers) for the
 > photos to stay followers-only; approve your meenow friends from Pixelfed or the
@@ -115,17 +142,24 @@ launched from the robot dashboard.
 
 ### Viewing captures locally
 
-Pair `MEENOW_SAVE_DIR` with the capture viewer to check the robot's shots
-without posting anything:
+Set `MEENOW_SAVE_DIR` and the app starts a small localhost viewer as part of
+the run — open `http://127.0.0.1:8899/` (port via `MEENOW_VIEWER_PORT`) and the
+page shows the composite from the newest capture folder, auto-refreshing so the
+next run appears without restarting anything:
 
 ```bash
 MEENOW_DRY_RUN=true MEENOW_POST_NOW=true MEENOW_SAVE_DIR=./captures reachy-mini-meenow
-scripts/view-captures.py ./captures      # then open the printed URL
 ```
 
-The page always shows the composite from the newest capture folder and
-auto-refreshes, so the next run appears without restarting anything. It serves
-only files from the captures directory (localhost only) — no external links.
+To browse captures without running the bot, the same server is available
+standalone:
+
+```bash
+scripts/view-captures.py ./captures
+```
+
+It serves only files from the captures directory (localhost only) — no external
+links.
 
 ## Autostart on boot (Raspberry Pi)
 

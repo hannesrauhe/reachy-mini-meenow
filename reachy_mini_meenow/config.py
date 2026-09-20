@@ -59,6 +59,10 @@ class Config:
     touch_trigger: bool
     touch_threshold_deg: float
     save_dir: Path | None
+    viewer_port: int
+    head_teach: bool
+    head_teach_timeout_s: float
+    selfie_zoom: float
 
 
 def load_config() -> Config:
@@ -92,7 +96,8 @@ def load_config() -> Config:
     mirror_flip_raw = os.environ.get("MEENOW_MIRROR_FLIP", "").strip()
     mirror_flip = _truthy(mirror_flip_raw) if mirror_flip_raw else True
 
-    # Manual trigger: wiggle a torque-released antenna to fire a capture.
+    # Antenna gestures (torque-released while idle): one antenna = capture,
+    # both = teach the head. Threshold is how far a push counts as a deflection.
     touch_raw = os.environ.get("MEENOW_TOUCH_TRIGGER", "").strip()
     touch_trigger = _truthy(touch_raw) if touch_raw else True
     touch_threshold_deg = _float_env("MEENOW_TOUCH_THRESHOLD_DEG", 20.0)
@@ -104,6 +109,18 @@ def load_config() -> Config:
     # the shots can be inspected without posting — most useful with DRY_RUN.
     save_dir_env = os.environ.get("MEENOW_SAVE_DIR", "").strip()
     save_dir = Path(save_dir_env).expanduser() if save_dir_env else None
+    viewer_port = int(_float_env("MEENOW_VIEWER_PORT", 8899))
+
+    # Head teach mode: hold both antennas down to make the head soft (gravity
+    # comp), move it, then raise the antennas to store the new neutral pose.
+    # Set false to disable. Requires the daemon on the Placo kinematics engine.
+    teach_raw = os.environ.get("MEENOW_HEAD_TEACH", "").strip()
+    head_teach = _truthy(teach_raw) if teach_raw else True
+    # Idle time in teach mode before the head drifts back to the old neutral.
+    head_teach_timeout_s = max(1.0, _float_env("MEENOW_HEAD_TEACH_TIMEOUT_S", 10.0))
+
+    # Digital zoom on the selfie: center-crop by this factor, resize back.
+    selfie_zoom = max(1.0, _float_env("MEENOW_SELFIE_ZOOM", 1.0))
 
     if not dry_run:
         missing = [
@@ -139,6 +156,10 @@ def load_config() -> Config:
         touch_trigger=touch_trigger,
         touch_threshold_deg=touch_threshold_deg,
         save_dir=save_dir,
+        viewer_port=viewer_port,
+        head_teach=head_teach,
+        head_teach_timeout_s=head_teach_timeout_s,
+        selfie_zoom=selfie_zoom,
     )
 
 

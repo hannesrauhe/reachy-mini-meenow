@@ -50,6 +50,26 @@ def read_antennas(reachy_mini) -> list[float] | None:
         return None
 
 
+# The SDK's near-vertical antenna pose (10° off exactly-vertical, which is an
+# unstable equilibrium that shakes). Used as the deterministic trigger baseline.
+UP_ANTENNAS_RAD = [-0.1745, 0.1745]
+
+
+def perk_antennas(reachy_mini, duration: float = 0.8) -> None:
+    """Raise the antennas to the near-vertical pose while torque is still on.
+
+    Head and body are explicitly held (``head=None``, ``body_yaw=None``) so the
+    perk-up never disturbs a hand-aimed head pose.
+    """
+    log.info("perk_antennas: raising")
+    try:
+        reachy_mini.goto_target(
+            antennas=list(UP_ANTENNAS_RAD), body_yaw=None, duration=duration
+        )
+    except Exception as exc:  # noqa: BLE001 - cosmetic, degrade to drooping
+        log.warning("perk_antennas failed: %s", exc)
+
+
 def _neutral_pose():
     return create_head_pose(yaw=0.0, pitch=0.0, roll=0.0, z=0.0, degrees=True, mm=True)
 
@@ -117,26 +137,22 @@ def hello(reachy_mini, stop_event: threading.Event) -> None:
     go_neutral(reachy_mini, duration=0.6)
 
 
-def get_ready(reachy_mini, stop_event: threading.Event, countdown_s: int = 3) -> None:
-    """A brief attention wiggle, then face the camera and hold for a countdown."""
+def get_ready(reachy_mini, stop_event: threading.Event, countdown_s: int = 3,
+              hold_pose=None) -> None:
+    """A brief attention wiggle, then face the camera and hold for a countdown.
+
+    ``hold_pose`` defaults to :func:`go_neutral`; pass a callable to hold a
+    taught neutral pose instead of the absolute forward-facing one.
+    """
     log.info("get_ready: wiggle")
     _wiggle(reachy_mini, stop_event, duration=1.4,
             yaw_amp=18.0, pitch_amp=8.0, antenna_amp_deg=30.0,
             yaw_hz=0.7, antenna_hz=1.2)
     if stop_event.is_set():
         return
-    go_neutral(reachy_mini, duration=0.5)
+    (hold_pose or go_neutral)(reachy_mini, duration=0.5)
     log.info("get_ready: countdown %ds", countdown_s)
     for _ in range(max(0, countdown_s)):
         if stop_event.is_set():
             return
         time.sleep(1.0)
-
-
-def celebrate(reachy_mini, stop_event: threading.Event) -> None:
-    """A small happy wiggle after a successful post."""
-    log.info("celebrate")
-    _wiggle(reachy_mini, stop_event, duration=1.6,
-            yaw_amp=12.0, pitch_amp=12.0, antenna_amp_deg=35.0,
-            yaw_hz=1.5, antenna_hz=2.0)
-    go_neutral(reachy_mini, duration=0.5)

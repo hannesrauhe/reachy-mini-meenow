@@ -19,6 +19,21 @@ class _Robot:
         self.media = _Media(frame)
 
 
+def test_zoom_below_one_is_identity():
+    f = np.arange(24, dtype=np.uint8).reshape(4, 6)
+    assert camera.zoom(f, 1.0) is f
+    assert camera.zoom(f, 0.5) is f
+
+
+def test_zoom_center_crop_expands_quadrant():
+    # Only the center quadrant is white; a 2x zoom of it must fill the frame.
+    f = np.zeros((100, 100, 3), dtype=np.uint8)
+    f[25:75, 25:75] = 255
+    out = camera.zoom(f, 2.0)
+    assert out.shape == f.shape
+    assert float(out.mean()) > 250
+
+
 def test_parse_device_numeric_vs_path():
     assert camera._parse_device("0") == 0
     assert camera._parse_device("2") == 2
