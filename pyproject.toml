@@ -17,6 +17,7 @@ dependencies = [
     "python-dotenv",
     "platformdirs",
     "tzdata",
+    "sounddevice",
 ]
 
 [project.optional-dependencies]

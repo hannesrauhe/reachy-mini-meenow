@@ -88,6 +88,16 @@ needed.
   (persisted, joint-space so the body never follows) and locks it; ~10 s of no
   movement instead returns to the old neutral. The neutral is what the robot
   returns to after the selfie.
+- **Voice commands** (`MEENOW_VOICE=true`) — the LEFT antenna is a soft push
+  button (`reachy_mini_meenow/voice_flow.py`): hold it down (right antenna up,
+  so *both down* stays the teach gesture) and the robot beeps and records from
+  the mic; release it and the recording is transcribed in German
+  (`stt.py`: resident whisper-server by default), matched to a smart-home flow
+  by an LLM (`llm.py`, any OpenAI-compatible endpoint) from the flow builder's
+  `ListFlows` catalogue, executed via `POST /flow/<name>` (`flows.py`), and
+  answered with a short spoken German reply (`tts.py`, local piper). Mic and
+  speaker are used directly via sounddevice — the `no_media` backend releases
+  them, same philosophy as the direct camera capture.
 
 ## Configuration
 
@@ -175,6 +185,48 @@ scripts/view-captures.py ./captures
 
 It serves only files from the captures directory (localhost only) — no external
 links.
+
+## Voice commands (smart-home flows)
+
+Hold the **left antenna down** → beep, recording starts. **Release** → the
+recording is transcribed (German), an LLM picks the matching flow from the
+flow builder, fires it, and the robot speaks a short German reply. Enable
+with `MEENOW_VOICE=true` (off by default). The right antenna must stay up
+while pushing, so *both antennas down* remains the head-teach gesture and the
+clock winding is unaffected.
+
+One-time setup of the local speech stack:
+
+```bash
+# 1. whisper.cpp (a checkout next to this repo is assumed by the defaults):
+cd ../whisper.cpp
+cmake -B build && cmake --build build -j --config Release
+# German large-v3-turbo in ggml format (the HF safetensors original does not
+# load in whisper.cpp; this is a pre-converted mirror of it):
+huggingface-cli download cstr/whisper-large-v3-turbo-german-ggml \
+  ggml-model.bin --local-dir models/ --local-dir-use-symlinks False
+mv models/ggml-model.bin models/ggml-large-v3-turbo-german.bin
+
+# 2. piper TTS with a German voice (into the bot's venv):
+.reachy-venv/bin/pip install piper-tts
+# grab a voice, e.g. https://huggingface.co/rhasspy/piper-voices
+#   -> de/de_DE/thorsten/medium/de_DE-thorsten-medium.onnx(+.json)
+
+# 3. check the mic/speaker indices (empty = default is usually right):
+.reachy-venv/bin/python -m sounddevice
+```
+
+Then run with e.g. `MEENOW_VOICE=true MEENOW_DRY_RUN=true reachy-mini-meenow`
+and say *"schalt das licht im salon an"* while holding the left antenna.
+
+The STT default is a resident **whisper-server**: if nothing answers
+`MEENOW_WHISPER_SERVER_URL/health` at startup, the app spawns one itself
+(model loaded once, so a command transcribes in a fraction of a second) and
+stops it on exit. `MEENOW_STT_PROVIDER=whisper_cli` runs whisper-cli once per
+command instead (no daemon, but pays the model reload every time), and
+`mistral` sends the audio to Mistral's Voxtral API (`MEENOW_MISTRAL_API_KEY`).
+The flow picker talks to any OpenAI-compatible endpoint
+(`MEENOW_LLM_BASE_URL`); without `MEENOW_PIPER_VOICE` the robot only beeps.
 
 ## Autostart on boot (Raspberry Pi)
 
