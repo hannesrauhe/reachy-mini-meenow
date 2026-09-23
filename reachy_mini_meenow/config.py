@@ -66,6 +66,26 @@ class Config:
     clock_trigger: bool
     clock_tick_s: float
     clock_up_deg: float | None
+    # Voice commands: left antenna push-to-talk -> smart-home flows.
+    voice: bool
+    flows_url: str
+    llm_base_url: str
+    llm_api_key: str | None
+    llm_model: str
+    stt_provider: str
+    whisper_server_url: str
+    whisper_server_bin: str
+    whisper_cli_bin: str
+    whisper_model: str
+    whisper_lang: str
+    whisper_threads: int
+    mistral_api_key: str | None
+    mistral_stt_model: str
+    piper_bin: str
+    piper_voice: str | None
+    voice_max_record_s: float
+    audio_input_device: int | None
+    audio_output_device: int | None
 
 
 def load_config() -> Config:
@@ -138,6 +158,60 @@ def load_config() -> Config:
     except ValueError:
         clock_up_deg = None
 
+    # --- Voice commands (left antenna push-to-talk -> smart-home flows) ------
+    voice_raw = os.environ.get("MEENOW_VOICE", "").strip()
+    voice = _truthy(voice_raw) if voice_raw else False
+    flows_url = os.environ.get(
+        "MEENOW_FLOWS_URL", "http://raspi.fritz.box:8080"
+    ).strip().rstrip("/")
+    llm_base_url = os.environ.get(
+        "MEENOW_LLM_BASE_URL", "http://localhost:11436/v1"
+    ).strip().rstrip("/")
+    llm_api_key = os.environ.get("MEENOW_LLM_API_KEY", "").strip() or None
+    llm_model = os.environ.get("MEENOW_LLM_MODEL", "mistral-small-latest").strip()
+    # STT: whisper_cpp (resident whisper-server) | whisper_cli | mistral.
+    stt_provider = os.environ.get("MEENOW_STT_PROVIDER", "whisper_cpp").strip()
+    # Default whisper.cpp location: the sibling checkout in this workspace.
+    _ws_whisper = Path(__file__).resolve().parents[2] / "whisper.cpp"
+    whisper_server_url = os.environ.get(
+        "MEENOW_WHISPER_SERVER_URL", "http://127.0.0.1:8180"
+    ).strip().rstrip("/")
+    whisper_server_bin = os.environ.get(
+        "MEENOW_WHISPER_SERVER_BIN", str(_ws_whisper / "build" / "bin" / "whisper-server")
+    ).strip()
+    whisper_cli_bin = os.environ.get(
+        "MEENOW_WHISPER_CPP_BIN", str(_ws_whisper / "build" / "bin" / "whisper-cli")
+    ).strip()
+    whisper_model = os.environ.get(
+        "MEENOW_WHISPER_MODEL", str(_ws_whisper / "models" / "ggml-large-v3-turbo-german.bin")
+    ).strip()
+    whisper_lang = os.environ.get("MEENOW_WHISPER_LANG", "de").strip() or "de"
+    whisper_threads = max(1, int(_float_env("MEENOW_WHISPER_THREADS", 8)))
+    mistral_api_key = os.environ.get("MEENOW_MISTRAL_API_KEY", "").strip() or None
+    # Voxtral Mini Transcribe 2 (26.02). The old "voxtral-mini"/25.07 alias is deprecated.
+    mistral_stt_model = os.environ.get("MEENOW_MISTRAL_STT_MODEL", "voxtral-mini-2602").strip()
+
+    # One key for both Mistral jobs: reuse it for the LLM, but only when the
+    # LLM endpoint really is Mistral — never leak it to a local/other host.
+    if llm_api_key is None and mistral_api_key and "mistral.ai" in llm_base_url:
+        llm_api_key = mistral_api_key
+
+    # TTS: local piper CLI with a German voice model (unset = no voice, beeps).
+    piper_bin = os.environ.get("MEENOW_PIPER_BIN", "piper").strip() or "piper"
+    piper_voice = os.environ.get("MEENOW_PIPER_VOICE", "").strip() or None
+
+    voice_max_record_s = max(1.0, _float_env("MEENOW_VOICE_MAX_RECORD_S", 15.0))
+
+    def _int_env(name: str) -> int | None:
+        raw = os.environ.get(name, "").strip()
+        try:
+            return int(raw) if raw else None
+        except ValueError:
+            return None
+
+    audio_input_device = _int_env("MEENOW_AUDIO_INPUT_DEVICE")
+    audio_output_device = _int_env("MEENOW_AUDIO_OUTPUT_DEVICE")
+
     if not dry_run:
         missing = [
             name
@@ -179,6 +253,25 @@ def load_config() -> Config:
         clock_trigger=clock_trigger,
         clock_tick_s=clock_tick_s,
         clock_up_deg=clock_up_deg,
+        voice=voice,
+        flows_url=flows_url,
+        llm_base_url=llm_base_url,
+        llm_api_key=llm_api_key,
+        llm_model=llm_model,
+        stt_provider=stt_provider,
+        whisper_server_url=whisper_server_url,
+        whisper_server_bin=whisper_server_bin,
+        whisper_cli_bin=whisper_cli_bin,
+        whisper_model=whisper_model,
+        whisper_lang=whisper_lang,
+        whisper_threads=whisper_threads,
+        mistral_api_key=mistral_api_key,
+        mistral_stt_model=mistral_stt_model,
+        piper_bin=piper_bin,
+        piper_voice=piper_voice,
+        voice_max_record_s=voice_max_record_s,
+        audio_input_device=audio_input_device,
+        audio_output_device=audio_output_device,
     )
 
 

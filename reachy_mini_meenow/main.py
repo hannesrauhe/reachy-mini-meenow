@@ -19,12 +19,14 @@ from pathlib import Path
 
 from reachy_mini import ReachyMini, ReachyMiniApp
 
-from . import camera, gestures
+from . import audio, camera, gestures, stt
 from .antenna_gestures import ONE, UP, AntennaGesture
 from .capture_server import start_capture_server, stop_capture_server
-from .clock_antenna import ClockAntenna
+from .clock_antenna import ClockAntenna, IDLE as CLOCK_IDLE
 from .config import Config, load_config, resolve_tz
+from .flows import FlowClient
 from .head_teacher import LOCKED, HeadTeacher
+from .llm import FlowPicker
 from .pixelfed import PixelfedClient, build_status_text
 from .state import (
     load_neutral_pose,
@@ -33,6 +35,8 @@ from .state import (
     save_posted_trigger_ms,
 )
 from .trigger import TriggerClock
+from .tts import Speaker, synthesize_piper
+from .voice_flow import VoiceFlow, run_turn
 
 log = logging.getLogger(__name__)
 
@@ -72,15 +76,19 @@ def _interruptible_sleep(total_ms: int, stop_event: threading.Event) -> None:
 def _wait_gesture(total_ms: int, stop_event: threading.Event,
                   gesture: AntennaGesture | None,
                   teacher: HeadTeacher | None,
-                  clock: ClockAntenna | None = None) -> bool:
-    """Sleep ~``total_ms`` in steps, driving the teacher/clock and watching.
+                  clock: ClockAntenna | None = None,
+                  voice: VoiceFlow | None = None) -> str | None:
+    """Sleep ~``total_ms`` in steps, driving the teacher/clock/voice and watching.
 
     Each step polls the antenna gesture and feeds it to the head teacher (so the
-    teach state machine advances even while we idle) and ticks the clock-antenna
-    countdown. Returns True when a capture is due: the clock striking twelve,
-    or (clock disabled) the single-antenna tap — but only while the head is
-    LOCKED, so the transient one-antenna reading while *raising* out of teach
-    mode is not mistaken for a capture.
+    teach state machine advances even while we idle), ticks the clock-antenna
+    countdown and the voice-button state machine. Returns the event that fired:
+    ``"capture"`` — the clock striking twelve, or (clock disabled) the single-
+    antenna tap, but only while the head is LOCKED, so the transient
+    one-antenna reading while *raising* out of teach mode is not mistaken for a
+    capture — or ``"voice"`` (left antenna pushed down = push-to-talk). While
+    voice is enabled the one-antenna tap is suppressed: the left push belongs
+    to the voice button.
     """
     step_s = 0.2
     end = time.monotonic() + total_ms / 1000
@@ -90,11 +98,13 @@ def _wait_gesture(total_ms: int, stop_event: threading.Event,
             teacher.update(g)
         if clock is not None:
             if clock.update() == "strike":
-                return True
-        elif g == ONE and (teacher is None or teacher.state == LOCKED):
-            return True
+                return "capture"
+        elif g == ONE and voice is None and (teacher is None or teacher.state == LOCKED):
+            return "capture"
+        if voice is not None and voice.update() == "start":
+            return "voice"
         time.sleep(step_s)
-    return False
+    return None
 
 
 class MeenowApp(ReachyMiniApp):
@@ -170,6 +180,15 @@ class MeenowApp(ReachyMiniApp):
             else None
         )
 
+        # Voice stack: left antenna push-to-talk -> smart-home flow. Built last
+        # so a broken flow/LLM/whisper setup degrades to "no voice" rather than
+        # blocking the photo ritual it shares the robot with.
+        voice, whisper_proc = (
+            self._build_voice(cfg, reachy_mini, antenna_clock)
+            if cfg.voice
+            else (None, None)
+        )
+
         try:
             if cfg.post_now:
                 log.info("MEENOW_POST_NOW set: firing one capture immediately.")
@@ -185,9 +204,11 @@ class MeenowApp(ReachyMiniApp):
                 if teacher is not None:
                     teacher.go_to_neutral()
                 log.info(
-                    "meenow ready — %s, both antennas down = teach the head.",
+                    "meenow ready — %s%s both antennas down = teach the head.",
                     "wind the right antenna to 12 = post" if antenna_clock is not None
                     else "one antenna = post",
+                    ", hold the left antenna down = voice command,"
+                    if voice is not None else ", ",
                 )
 
             if gesture is not None and not gesture.arm():
@@ -223,7 +244,13 @@ class MeenowApp(ReachyMiniApp):
                         "Trigger %d already outside the %d-min window; waiting for next.",
                         trigger_ms, cfg.catchup_min,
                     )
-                if _wait_gesture(_POLL_MS, stop_event, gesture, teacher, antenna_clock):
+                event = _wait_gesture(
+                    _POLL_MS, stop_event, gesture, teacher, antenna_clock, voice
+                )
+                if event == "voice":
+                    self._voice_turn(cfg, reachy_mini, voice, stop_event, gesture)
+                    continue
+                if event == "capture":
                     log.info(
                         "Clock struck twelve: capturing now."
                         if antenna_clock is not None
@@ -249,9 +276,112 @@ class MeenowApp(ReachyMiniApp):
             if teacher is not None:
                 teacher.suspend_for_capture()
             stop_capture_server(viewer)
+            stt.stop_server(whisper_proc)
             if gesture is not None:
                 gesture.disarm()
             gestures.go_neutral(reachy_mini)
+
+    def _build_voice(self, cfg: Config, reachy_mini, antenna_clock):
+        """Assemble the voice stack; returns (VoiceFlow | None, whisper proc).
+
+        A failure anywhere here (no mic, dead whisper-server, missing piper
+        voice) logs and disables voice rather than failing the app — the photo
+        ritual must survive a broken voice setup.
+        """
+        try:
+            whisper_proc = None
+            if cfg.stt_provider == "whisper_cpp":
+                whisper_proc = stt.ensure_server(
+                    cfg.whisper_server_url,
+                    server_bin=cfg.whisper_server_bin,
+                    model=cfg.whisper_model,
+                    threads=cfg.whisper_threads,
+                )
+            transcriber = stt.Transcriber(
+                cfg.stt_provider,
+                server_url=cfg.whisper_server_url,
+                cli_bin=cfg.whisper_cli_bin,
+                model=cfg.whisper_model,
+                lang=cfg.whisper_lang,
+                threads=cfg.whisper_threads,
+                mistral_key=cfg.mistral_api_key,
+                mistral_model=cfg.mistral_stt_model,
+            )
+            synth = None
+            if cfg.piper_voice:
+                piper_voice = cfg.piper_voice
+
+                def synth(text: str) -> bytes:
+                    return synthesize_piper(
+                        text, bin_path=cfg.piper_bin, voice=piper_voice
+                    )
+            speaker = Speaker(
+                synth=synth,
+                play=(lambda wav: audio.play(wav, device=cfg.audio_output_device)),
+                beep=(lambda: audio.beep(device=cfg.audio_output_device)),
+            )
+            voice = VoiceFlow(
+                reachy_mini,
+                threshold_deg=cfg.touch_threshold_deg,
+                read=gestures.read_antennas,
+                # A clock countdown in flight owns the antennas — don't trigger.
+                busy=(lambda: antenna_clock is not None
+                      and antenna_clock.state != CLOCK_IDLE),
+            )
+            voice.flows = FlowClient(cfg.flows_url)
+            voice.picker = FlowPicker(
+                cfg.llm_base_url, cfg.llm_model, api_key=cfg.llm_api_key
+            )
+            voice.speaker = speaker
+            voice.transcriber = transcriber
+            voice.max_record_s = cfg.voice_max_record_s
+            voice.record_device = cfg.audio_input_device
+            log.info(
+                "Voice ready — flows at %s, LLM %s @ %s, STT %s, TTS %s.",
+                cfg.flows_url, cfg.llm_model, cfg.llm_base_url,
+                cfg.stt_provider, "piper" if synth else "beeps only",
+            )
+            return voice, whisper_proc
+        except Exception as exc:  # noqa: BLE001 - voice is optional
+            log.error("Voice setup failed, continuing without it: %s", exc)
+            return None, None
+
+    def _voice_turn(self, cfg: Config, reachy_mini, voice,
+                    stop_event: threading.Event,
+                    gesture: AntennaGesture | None) -> None:
+        """Record while the left antenna is held, then run the whole command turn.
+
+        Blocking in the poll loop is deliberate (the capture path does the
+        same). The antennas stay torque-free for the whole turn — the user must
+        be able to push the left antenna back up to stop the recording — which
+        is safe because the one-antenna capture tap is suppressed while voice
+        is on (see :func:`_wait_gesture`). Afterwards the gesture reader is
+        re-armed: that re-perks the antennas to the up pose and re-baselines,
+        so a lingering deflection cannot instantly re-trigger anything.
+        """
+        try:
+            voice.speaker.acknowledge()
+            wav = audio.record(
+                voice.max_record_s,
+                lambda: voice.released() or stop_event.is_set(),
+                device=voice.record_device,
+            )
+            voice.speaker.acknowledge()
+            if stop_event.is_set():
+                return
+            run_turn(
+                wav,
+                transcriber=voice.transcriber,
+                flows=voice.flows,
+                picker=voice.picker,
+                speaker=voice.speaker,
+            )
+        except Exception as exc:  # noqa: BLE001 - keep the loop alive
+            log.error("Voice turn failed: %s", exc)
+        finally:
+            voice.end_turn()
+            if gesture is not None:
+                gesture.arm()
 
     def _capture_and_post(self, cfg: Config, client, reachy_mini,
                           stop_event: threading.Event, *,
