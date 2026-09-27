@@ -35,7 +35,7 @@ from .state import (
     save_posted_trigger_ms,
 )
 from .trigger import TriggerClock
-from .tts import Speaker, synthesize_piper
+from .tts import Speaker, load_piper_voice, synthesize_piper
 from .voice_flow import VoiceFlow, run_turn
 
 log = logging.getLogger(__name__)
@@ -310,11 +310,18 @@ class MeenowApp(ReachyMiniApp):
             synth = None
             if cfg.piper_voice:
                 piper_voice = cfg.piper_voice
-
-                def synth(text: str) -> bytes:
-                    return synthesize_piper(
-                        text, bin_path=cfg.piper_bin, voice=piper_voice
+                try:
+                    # Resident model: loaded once, replies synthesise in seconds.
+                    synth = load_piper_voice(piper_voice)
+                except Exception as exc:  # noqa: BLE001 - CLI still works
+                    log.warning(
+                        "Piper Python API unavailable (%s), falling back to CLI.", exc
                     )
+
+                    def synth(text: str) -> bytes:
+                        return synthesize_piper(
+                            text, bin_path=cfg.piper_bin, voice=piper_voice
+                        )
             speaker = Speaker(
                 synth=synth,
                 play=(lambda wav: audio.play(wav, device=cfg.audio_output_device)),

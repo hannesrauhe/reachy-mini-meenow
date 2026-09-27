@@ -1,9 +1,13 @@
 """Text-to-speech for the robot's spoken reply (local piper, German voice).
 
-``piper`` is a CLI: ``piper --model <voice.onnx> --output_file <out.wav>``
-reads the text on stdin and writes a PCM WAV, which ``audio.play`` plays on
-the robot's speaker. A subprocess per reply is fine — piper synthesises a
-sentence in well under a second and the voice turn is already blocking.
+Two backends behind the same ``text -> WAV bytes`` seam:
+
+* :func:`load_piper_voice` — the resident Python API (``PiperVoice``): the
+  ONNX model is loaded once and kept warm, so each reply synthesises in
+  seconds. Strongly preferred on slow machines (a Raspberry Pi reloads a
+  60 MB model per CLI invocation, which costs ~20 s per reply).
+* :func:`synthesize_piper` — the piper CLI as a one-shot subprocess. Used as
+  a fallback when the Python API is unavailable; pays the model load per call.
 
 The provider is a plain callable seam so a cloud TTS (e.g. Mistral) can be
 added later without touching the turn orchestrator.
@@ -11,13 +15,35 @@ added later without touching the turn orchestrator.
 
 from __future__ import annotations
 
+import io
 import logging
 import subprocess
 import tempfile
+import wave
 
 log = logging.getLogger(__name__)
 
 _TIMEOUT_S = 30.0
+
+
+def load_piper_voice(voice: str):
+    """Load a piper voice once and return a resident ``synth(text) -> wav``.
+
+    Raises on import/load failure so the caller can fall back to the CLI.
+    """
+    from piper import PiperVoice  # lazy: only needed when a voice is configured
+
+    log.info("Loading piper voice %s ...", voice)
+    piper_voice = PiperVoice.load(voice)
+    log.info("Piper voice loaded.")
+
+    def synth(text: str) -> bytes:
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as w:
+            piper_voice.synthesize_wav(text, w)
+        return buf.getvalue()
+
+    return synth
 
 
 def synthesize_piper(text: str, *, bin_path: str, voice: str,
@@ -75,4 +101,4 @@ class Speaker:
             if self._beep is not None:
                 self._beep()
         except Exception as exc:  # noqa: BLE001
-            log.debug("beep failed: %s", exc)
+            log.warning("beep failed: %s", exc)

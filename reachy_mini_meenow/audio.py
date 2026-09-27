@@ -117,13 +117,20 @@ def play(wav: bytes, *, device: int | None = None) -> None:
 
 
 def beep(*, device: int | None = None, freq: float = 880.0,
-         duration_s: float = 0.12, volume: float = 0.3) -> None:
-    """Short sine earcon so recording start/stop is audible."""
+         duration_s: float = 0.25, volume: float = 0.7) -> None:
+    """Short sine earcon so recording start/stop is audible.
+
+    Padded with silence front and back: opening a fresh ALSA stream drops the
+    first ~100 ms while the buffer fills, which would otherwise eat a short
+    tone entirely (long speech only loses its inaudible head).
+    """
     n = int(SAMPLE_RATE * duration_s)
     t = np.arange(n) / SAMPLE_RATE
     fade = min(n // 8, 64)
-    samples = volume * np.sin(2 * math.pi * freq * t) * 32767
-    samples[:fade] *= np.linspace(0, 1, fade)
-    samples[-fade:] *= np.linspace(1, 0, fade)
+    tone = volume * np.sin(2 * math.pi * freq * t) * 32767
+    tone[:fade] *= np.linspace(0, 1, fade)
+    tone[-fade:] *= np.linspace(1, 0, fade)
+    pad = np.zeros(int(SAMPLE_RATE * 0.1), dtype="float64")
+    samples = np.concatenate([pad, tone, pad])
     with _open_output(device) as out:
         out.write(samples.astype("int16").reshape(-1, 1))
